@@ -1,0 +1,49 @@
+{
+  "name": "gemini-stream",
+  "productName": "Gemini Stream",
+  "version": "0.2.0",
+  "description": "Game Pass streaming companion",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-builder",
+    "publish": "electron-forge publish",
+    "lint": "echo \"No linting configured\"",
+    "postinstall": "install-app-deps",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "gemini.stream",
+    "linux": {
+      "category": "utilities",
+      "target": "AppImage",
+      "icon": "build/background.png"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    }
+  },
+  "keywords": [],
+  "author": {
+    "name": "Shrimp McDouglas",
+    "email": "ShrimpdependenceDay@gmail.com"
+  },
+  "license": "MIT",
+  "config": {},
+  "dependencies": {
+    "assert": "^2.0.0",
+    "electron-store": "^8.0.1",
+    "ip": "^1.1.8",
+    "jquery": "^3.6.0",
+    "socket.io": "^4.5.1",
+    "tabulator-tables": "^5.2.6"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^6.0.0-beta.63",
+    "electron": "19.0.4",
+    "electron-builder": "^23.0.3"
+  }
+}

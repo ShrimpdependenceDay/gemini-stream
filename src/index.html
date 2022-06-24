@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gemini Stream</title>
+    <link href="tabulator_midnight.css" rel="stylesheet">
+    <link rel="stylesheet" href="index.css" />
+    <style></style>
+  </head>
+  <body>
+    <div id="main_content" class="server" style="display:none;"> 
+      <div class="device_info_parent">
+        <div class="device_info_container">
+          <h1>Host (This Device)</h1>
+          <div class="device_info server_info">
+            <div class="device_info_header">
+              <h2 class="this_device_name">Host name</h2>
+            </div>
+            <table class="device_info_table host_info_table">
+              <tr>
+                <td>IP Address</td>
+                <td class="this_device_ip_address">192.168.x.x</td>
+              </tr>
+              <tr>
+                <td>Port</td>
+                <td class="this_port_disp"></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        
+        <div class="device_info_container">
+          <h1>Client</h1>
+          <div class="device_info client_info">
+            <div class="device_info_header">
+              <h2 class="that_device_name"></h2>
+            </div>
+            <table class="device_info_table client_info_table">
+              <tr>
+                <td>IP Address</td>
+                <td class="that_device_ip_address">192.168.x.x</td>
+              </tr>
+              <tr>
+                <td>Status</td>
+                <td class="connection_status">Searching...</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="host_button_row">
+        <button id="fetch_apps" onclick="fetch_apps()">Fetch installed apps</button>
+        <button id="load_apps" onclick="load_app_list()" style="display:none">Load installed apps</button>
+        <button id="sync_to_client" onclick="sync_to_client()" style="display:none">Sync</button>
+      </div>
+
+    </div>
+    <div id="main_content" class="client" style="display:none;">
+      <div class="device_info_parent">
+        <div class="device_info_container">
+          <h1>Host</h1>
+          <div class="device_info server_info">
+            <div class="device_info_header">
+              <h2 class="host_name_display">Host name</h2>
+            </div>
+            <table class="device_info_table host_info_table">
+              <tr>
+                <td>Status</td>
+                <td class="connection_status">Searching...</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        
+        <div class="device_info_container">
+          <h1>Client (This Device)</h1>
+          <div class="device_info client_info">
+            <div class="device_info_header">
+              <h2 class="this_device_name">Client name</h2>
+            </div>
+            <table class="device_info_table client_info_table">
+              <tr>
+                <td>IP Address</td>
+                <td class="this_device_ip_address">192.168.xx.xxx</td>
+              </tr>
+              <tr>
+                <td>Port</td>
+                <td class="this_port_disp"></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div id="app_list_table" class="app_list_component"></div>
+
+    <div id="app_list_footer" class="app_list_component" style="display:none"> 
+      <button id="export_selected_apps" onclick="export_selected_apps()" disabled="true">Export selected apps</button>
+    </div>
+
+    <div id="loading_screen" style="display:none">
+      <h1 id="current_status"></h1>
+      <div id="container">
+        <svg viewBox="0 0 100 100">
+          <defs>
+            <filter id="shadow">
+              <feDropShadow dx="0" dy="0" stdDeviation="1.5" 
+                flood-color="#fc6767"/>
+            </filter>
+          </defs>
+          <circle id="spinner" style="fill:transparent;stroke:#9721c5;stroke-width: 3px;stroke-linecap: round;filter:url(#shadow);" cx="50" cy="50" r="45"/>
+      </svg>
+      </div>
+    </div>
+
+
+    <div id="results_page" style="display:none;">
+      <div id="results_header">
+        <h3>Results</h3>
+        <button id="close-results" onclick="close_results_page()">&#10005;</button>
+      </div>
+       
+      <div id="results_content">
+        <p id="results_message"></p>
+      </div>
+
+      <div id="results_footer">
+        <button id="export_sync_to_client" onclick="sync_to_client()" style="display:none">Sync</button>
+        <button id="open_srm" onclick="open_srm()">Open Steam ROM Manager</button>
+      </div>
+    </div>
+    <div id="results-dialog-blanket" style="display:none;" onclick="close_results_page()"> </div>
+
+
+    <div id="settings_page" style="display:none;">
+      <div id="settings_header">
+        <h3>Settings</h3>
+        <button id="close-settings" onclick="close_settings_page()">&#10005;</button>
+      </div>
+       
+      <div id="settings_content" class="server">
+        <div class="settings-input"><p class="settings-label">Client IP Address</p><input type="text" class="settings" id="client_ip" name="client_ip" onkeypress="return isNumberKey(this, event);"></div>
+        <div class="settings-input"><p class="settings-label">Port</p><input type="number" class="settings" id="server_port" name="server_port" min="0" max="65535"></div>
+        <div class="settings-input">
+          <p class="settings-label">Shield Apps path</p>
+          <div class="settings_path_container">
+            <input class="settings path" type="text" id="shield_apps_dir" name="shield_apps_dir">
+            <button class="get_path folder"><img src="icons/folder.png"/></button>
+            <button class="go_to_dir"><img src="icons/go-to.png"/></button>
+          </div>
+        </div>
+
+        <div class="settings-input" id="known_apps_div"><p class="settings-label">Known applications</p>
+          <table id="known_apps">
+            <tr>
+              <th class="uwp_name">UWP Name</th>
+              <th class="display_name">Display Name</th>
+              <th class="delete_row"></th>
+            </tr>
+          </table>
+          <button id="add_known_app" onclick="add_known_app()">&#x2B;</button>
+        </div>
+      </div>
+
+      <div id="settings_content" class="client">
+        <div class="settings-input"><p class="settings-label">Port</p><input type="number" class="settings" id="client_port" name="client_port" min="0" max="65535"></div>
+
+        <div class="settings-input">
+          <p class="settings-label">Steam ROM Manager Location</p>
+          <div class="settings_path_container">
+            <input class="settings path optional" type="text" id="srm_location" alt="Hover text" name="srm_location" title="Path to Steam ROM Manager">
+            <button class="get_path file"><img src="icons/file.png"/></button>
+          </div>
+        </div>
+        <div class="settings-input"><p class="settings-label">Moonlight host name</p><input class="settings" type="text" id="host_name" name="host_name"></div>
+        <div class="settings-input"><p class="settings-label">Moonlight options</p><input class="settings" type="text" id="moonlight_options" name="moonlight_options"></div>
+      </div>
+
+      <div id="settings_footer">
+        <button id="reset-settings" onclick="reset_settings()">Reset</button>
+
+      </div>
+    </div>
+    <div id="settings-dialog-blanket" style="display:none;" onclick="close_settings_page()"> </div>
+
+    <!-- <button class="settings" onclick="open_settings_page()"><img src="icons/settings.png"/></button> -->
+
+
+    <!-- Insert this line above local script tags  -->
+    <script>if (typeof module === 'object') {window.module = module; module = undefined;}</script>
+    
+    <!-- normal script imports etc  -->
+    <script>
+      /*------------------------------------------------------
+      Init dark mode
+      ------------------------------------------------------*/
+      //determines if the user has a set theme
+      function detectColorScheme(){
+          // default to dark
+          document.documentElement.setAttribute("data-theme", "dark");
+          return;
+
+          var theme="light";    //default to light
+
+          //local storage is used to override OS theme settings
+          if(localStorage.getItem("theme")){
+              if(localStorage.getItem("theme") == "dark"){
+                  var theme = "dark";
+              }
+          } else if(!window.matchMedia) {
+              //matchMedia method not supported
+              return false;
+          } else if(window.matchMedia("(prefers-color-scheme: dark)").matches) {
+              //OS theme setting detected as dark
+              var theme = "dark";
+          }
+
+          //dark theme preferred, set document with a `data-theme` attribute
+          if (theme=="dark") {
+              document.documentElement.setAttribute("data-theme", "dark");
+          }
+      }
+      detectColorScheme();
+    </script>
+
+    <script type="text/javascript" src="../node_modules/tabulator-tables/dist/js/tabulator.min.js"></script>
+    <script src="jquery-3.4.1.js"></script>    
+    <script src="renderer.js"></script>
+
+    <!-- Insert this line after script tags -->
+    <script>if (window.module) module = window.module;</script>
+
+  </body>
+</html>
