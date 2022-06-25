@@ -1,7 +1,7 @@
 {
   "name": "gemini-stream",
   "productName": "Gemini Stream",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Game Pass streaming companion",
   "main": "src/index.js",
   "scripts": {
@@ -36,10 +36,13 @@
   "dependencies": {
     "assert": "^2.0.0",
     "electron-store": "^8.0.1",
+    "glob": "^8.0.3",
     "ip": "^1.1.8",
     "jquery": "^3.6.0",
+    "ps-node": "^0.1.6",
     "socket.io": "^4.5.1",
-    "tabulator-tables": "^5.2.6"
+    "tabulator-tables": "^5.2.6",
+    "tasklist": "^5.0.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^6.0.0-beta.63",

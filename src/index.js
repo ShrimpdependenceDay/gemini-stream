@@ -14,6 +14,40 @@ const { shell } = require('electron');
 log(ip.address()); // my ip address
 log(os.hostname());
 
+
+
+
+const getAllFiles = function(dirPath, arrayOfFiles) {
+  files = fs.readdirSync(dirPath)
+
+  arrayOfFiles = arrayOfFiles || []
+
+  files.forEach(function(file) {
+    if (fs.statSync(dirPath + "/" + file).isDirectory()) {
+      arrayOfFiles = getAllFiles(dirPath + "/" + file, arrayOfFiles)
+    } else {
+      arrayOfFiles.push(path.join(__dirname, dirPath, "/", file))
+    }
+  })
+
+  return arrayOfFiles
+}
+
+
+
+// try {
+//   const arrayOfFiles = getAllFiles("C:\\Program Files\\WindowsApps\\Microsoft.SeaofThieves_2.109.9493.2_x64__8wekyb3d8bbwe")
+//   for (const app of arrayOfFiles){
+//     if (app.endsWith(".exe")){
+//       console.log(app);
+//     }
+//   }
+// } catch(e) {
+//   console.log(e)
+// }
+
+
+
 // Shared variables
 var this_is_server;
 var connected = false;
@@ -87,6 +121,7 @@ process.on('uncaughtException', function (error) {
       error.code == 'ECONNRESET' ||
       error.code == 'ECONNABORTED' ||
       error.code == 'ENETUNREACH' ||
+      error.code == 'ECANCELED' ||
       error.code == 'ELIFECYCLE' ||
       error.code == 'ENOTFOUND' ) {
     log('Client not available - ' + error.code);
@@ -94,7 +129,7 @@ process.on('uncaughtException', function (error) {
   }
   else {
     log("ERROR: " + error);
-    mainWindow.setProgressBar(-1);
+    // mainWindow.setProgressBar(-1);
     throw(error);
   }
 });
@@ -160,11 +195,38 @@ const createWindow = () => {
   }
 };
 
-
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
+app.on('ready', function(){
+  // See if --command was provided
+  var game_arg_idx = process.argv.indexOf("--command");
+  if (game_arg_idx != -1 && process.argv.length > game_arg_idx){
+    console.log("Command:", process.argv[game_arg_idx + 1]);
+
+    if (fs.existsSync(app_list_path)){
+      var app_info_json = JSON.parse(fs.readFileSync(app_list_path));
+      var app_info = app_info_json.find(info => info.command === process.argv[game_arg_idx + 1]);
+      console.log("App info:", app_info);
+      spawn("explorer.exe", args=["shell:appsFolder\\" + app_info.command]);
+
+
+      setTimeout(() => {
+        for(const exe of app_info.executables){
+          // Send kill command
+          console.log("Sending kill command to", path.basename(exe));
+          spawn("taskkill", args=["/IM", path.basename(exe), "/F"]);
+        }
+      }, 10000);
+
+
+    }
+  }
+  else {
+    console.log("No game provided");
+    createWindow();
+  }
+});
 
 app.on('before-quit', function() {
   if (!this_is_server){
@@ -184,13 +246,13 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
+// app.on('activate', () => {
+//   // On OS X it's common to re-create a window in the app when the
+//   // dock icon is clicked and there are no other windows open.
+//   if (BrowserWindow.getAllWindows().length === 0) {
+//     createWindow();
+//   }
+// });
 
 function create_debug_log(){
   if (log_open) {
@@ -264,6 +326,18 @@ function get_display_name_and_id(app_object){
       if (display_name.includes("ms-resource")){
         display_name = "~Unknown";
       }
+
+      var executables = [];
+      try {
+        const arrayOfFiles = getAllFiles(app_object.InstallLocation.replace("\\", '/'))
+        for (const app of arrayOfFiles){
+          if (app.endsWith(".exe")){
+            executables.push(app);
+          }
+        }
+      } catch(e) {
+        console.log(e)
+      }
   
       for (const id of apx_ids){
         var this_app = {
@@ -272,7 +346,8 @@ function get_display_name_and_id(app_object){
           PackageFamilyName: app_object.PackageFamilyName,
           ID: id,
           DisplayName: display_name,
-          command: app_object.PackageFamilyName + "!" + id
+          command: app_object.PackageFamilyName + "!" + id,
+          executables: executables
         }
   
         app_list.push(this_app);
@@ -383,7 +458,7 @@ function fetch_installed_apps(){
 
               // for all other keys, just push the key value
               // pair at the current index
-              apx_list[index][key] = value;
+              apx_list[index][key] = value.replace(" \r", "");
           }
       }
 
@@ -396,7 +471,7 @@ function fetch_installed_apps(){
       for (const app of apx_list){
         var app_promise = get_display_name_and_id(app);
         app_promise.then(function(code) {
-          log("Fetched " + app.Name);
+          // log("Fetched " + app.Name);
           current_apps += 1;
           mainWindow.setProgressBar(current_apps/apx_list.length);
         })
