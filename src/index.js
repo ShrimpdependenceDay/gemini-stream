@@ -1,5 +1,5 @@
 // Includes
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, Notification } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const { spawn, spawnSync } = require('child_process');
@@ -13,8 +13,141 @@ const { shell } = require('electron');
 
 log(ip.address()); // my ip address
 log(os.hostname());
+log("App path: " + process.execPath);
 
 
+const gotTheLock = app.requestSingleInstanceLock()
+
+function process_args(args) {
+  // RETURN: do we need to create a window? True if
+  // there is no --command argument
+  var create_window = false;
+
+  // First, filter out args we don't care about
+  args = args.filter(e => e !== "--allow-file-access-from-files");
+  log("Filtered args: " + args);
+
+  // Next, see if there is a "--command" arg
+  var command_arg_idx = args.indexOf("--command");
+  log("Command arg index: " + command_arg_idx)
+  if (command_arg_idx != -1 && args.length > command_arg_idx){
+    // There was, so get the command
+    var command = args[command_arg_idx + 1];
+
+    // See if there are any executables tied to this command
+    if (fs.existsSync(app_list_path)){
+      var app_info_json = JSON.parse(fs.readFileSync(app_list_path));
+      var app_info = app_info_json.find(info => info.command === command);
+
+      // Couldn't find anything - exit
+      if (!app_info){
+        log("Could not find app info for " + command);
+        app.quit();
+        return;
+      }
+
+      // We found the application tied to this command, 
+      // so go ahead and start it
+      spawn("explorer.exe", args=["shell:appsFolder\\" + app_info.command]);
+      running_game_executables
+      for(const exe of app_info.executables){
+        // Add all of the executables for this
+        // command to the exes tracker
+        running_game_executables.push(exe);
+      }
+
+      if (running_game_executables.length > 0){
+        log("Monitoring the following applications:");
+        for(const exe of running_game_executables){
+          log("\t" + path.basename(exe));
+        }
+
+        // // Start looking for executables after 10 seconds, to
+        // // give them a chance to launch
+        // setTimeout(() => {
+        //   setInterval(function() {
+        //     monitor_executables();
+        //   }, 3000)
+        // }, 10000);
+
+        // Every second, see if Nvidia streamer is running
+        nv_mon = setInterval(function() {
+          monitor_nv_streamer();
+        }, 1000);
+
+      }
+      else {
+        log("No executables could be located for the specified game.");
+      }
+    }
+  }
+  else {
+    create_window = true;
+  }
+  return(create_window);
+}
+
+if (!gotTheLock) {
+  console.log("Did not get lock. Quitting.");
+  app.quit()
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Process arguments
+    process_args(commandLine);
+  });
+    
+  // Create mainWindow, load the rest of the app, etc...
+  app.on('ready', function(){
+    // Update running tasks every second
+    setInterval(function() {
+      update_tasks();
+    }, 1000);
+
+    // Process arguments
+    var create_window = process_args(process.argv);
+
+    // Create window
+    if (create_window){
+      createWindow();
+    }
+
+  });
+}
+
+function monitor_nv_streamer(){
+  // check if streamer is in our list of running apps
+  var nv_streamer_task = tasks_json.find(cnfg => cnfg["Image Name"] === "nvstreamer.exe");
+
+  if (nv_streamer_task){
+    nv_streamer_running = true;
+    log("nvstreamer.exe is running");
+  }
+  else {
+    log("nvstreamer.exe is not running");
+    // nvstreamer.exe is not running
+    if (nv_streamer_running) {
+      nv_streamer_running = false;
+      // If it was running before this check, that means the app
+      // quit, and we need to shut things down here on the server
+      for(const exe of running_game_executables){
+        log("Sending kill message to " + path.basename(exe));
+        spawn("taskkill", args=["/IM", path.basename(exe), "/F"]);
+        showNotification("Gemini Stream", "Sending kill message to " + path.basename(exe));
+      }
+      clearInterval(nv_mon);
+
+      // Sudoku if we don't have a window open
+      // if (!mainWindow){
+      //   app.quit();
+      // }
+    }
+  }
+}
+
+
+function showNotification (title, body) {
+  new Notification({ title: title, body: body }).show()
+}
 
 
 const getAllFiles = function(dirPath, arrayOfFiles) {
@@ -26,26 +159,12 @@ const getAllFiles = function(dirPath, arrayOfFiles) {
     if (fs.statSync(dirPath + "/" + file).isDirectory()) {
       arrayOfFiles = getAllFiles(dirPath + "/" + file, arrayOfFiles)
     } else {
-      arrayOfFiles.push(path.join(__dirname, dirPath, "/", file))
+      arrayOfFiles.push(path.join(dirPath, "/", file))
     }
   })
 
   return arrayOfFiles
 }
-
-
-
-// try {
-//   const arrayOfFiles = getAllFiles("C:\\Program Files\\WindowsApps\\Microsoft.SeaofThieves_2.109.9493.2_x64__8wekyb3d8bbwe")
-//   for (const app of arrayOfFiles){
-//     if (app.endsWith(".exe")){
-//       console.log(app);
-//     }
-//   }
-// } catch(e) {
-//   console.log(e)
-// }
-
 
 
 // Shared variables
@@ -64,6 +183,7 @@ var steam_rm_cnfg_path = path.resolve(os.homedir(), '.config/steam-rom-manager/u
 
 // Stream server variables
 var socket;
+var tasks_json;
 var cpu_count = os.cpus().length;
 var app_data = process.env.LOCALAPPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
 var app_list_path = path.resolve(usr_data_path, 'app_list.json');
@@ -71,9 +191,13 @@ var manifests_dir_path = path.resolve(usr_data_path, 'srm_manifests');
 var srm_manifest_path = path.resolve(manifests_dir_path, 'gemini_stream_manifest.json');
 var box_art_filname = 'box-art.png';
 var box_art_path = path.resolve(__dirname, "icons", box_art_filname);
+var helper_path = path.resolve(usr_data_path, "gemini_stream_game_handler.exe");
 var log_open = false;
 var app_list = [];
+var nv_streamer_running = false;
 var current_apps = 0;
+var running_game_executables = [];
+var nv_mon;
 
 // Default settings
 var default_settings = {
@@ -195,42 +319,16 @@ const createWindow = () => {
   }
 };
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.on('ready', function(){
-  // See if --command was provided
-  var game_arg_idx = process.argv.indexOf("--command");
-  if (game_arg_idx != -1 && process.argv.length > game_arg_idx){
-    console.log("Command:", process.argv[game_arg_idx + 1]);
-
-    if (fs.existsSync(app_list_path)){
-      var app_info_json = JSON.parse(fs.readFileSync(app_list_path));
-      var app_info = app_info_json.find(info => info.command === process.argv[game_arg_idx + 1]);
-      console.log("App info:", app_info);
-      spawn("explorer.exe", args=["shell:appsFolder\\" + app_info.command]);
-
-
-      setTimeout(() => {
-        for(const exe of app_info.executables){
-          // Send kill command
-          console.log("Sending kill command to", path.basename(exe));
-          spawn("taskkill", args=["/IM", path.basename(exe), "/F"]);
-        }
-      }, 10000);
-
-
-    }
-  }
-  else {
-    console.log("No game provided");
-    createWindow();
-  }
-});
-
 app.on('before-quit', function() {
   if (!this_is_server){
     close_socket_server();
+  }
+  else{
+    // for(const exe of running_game_executables){
+    //   log("Sending kill message to " + path.basename(exe));
+    //   spawn("taskkill", args=["/IM", path.basename(exe), "/F"]);
+    //   showNotification("Gemini Stream", "Sending kill message to " + path.basename(exe));
+    // }
   }
 });
 
@@ -513,6 +611,69 @@ function fetch_installed_apps(){
   });
 
   return "";
+}
+
+function update_tasks(){
+  // Get all running tasks
+  var all_data = ""
+  const ls = spawn('tasklist', args=["/FO", "CSV"]);
+
+  ls.stdout.on('data', (data) => {
+    all_data = all_data + data.toString();
+  });
+
+  ls.on("exit", function(code) {
+    tasks_json = csvJSON(all_data.replaceAll("\"", '').replaceAll('\r', ''));
+  });
+}
+
+// // Monitor the currently opened game's executables.
+// // If none of them are running, end process. 
+// function monitor_executables(){
+//   // Sanity
+//   if (running_game_executables.length == 0){
+//     // app.quit();
+//   }
+
+//   for (const exe of running_game_executables){
+//     var game_exe = tasks_json.find(cnfg => cnfg["Image Name"] === path.basename(exe));
+//     if(game_exe){
+//       console.log("Found", exe);
+//       return;
+//     }
+//   }
+//   console.log("No executables running");
+//   // app.quit();
+// }
+
+//var csv is the CSV file with headers
+function csvJSON(csv){
+
+  var lines=csv.split("\n");
+
+  var result = [];
+
+  // NOTE: If your columns contain commas in their values, you'll need
+  // to deal with those before doing the next step 
+  // (you might convert them to &&& or something, then covert them back later)
+  // jsfiddle showing the issue https://jsfiddle.net/
+  var headers=lines[0].split(",");
+
+  for(var i=1;i<lines.length;i++){
+
+      var obj = {};
+      var currentline=lines[i].split(",");
+
+      for(var j=0;j<headers.length;j++){
+          obj[headers[j]] = currentline[j];
+      }
+
+      result.push(obj);
+
+  }
+
+  return result; //JavaScript object
+  // return JSON.stringify(result); //JSON
 }
 
 
@@ -1046,12 +1207,13 @@ ipcMain.on("main_init", (event, data) => {
   }, 1000);
 
   if (this_is_server) {
-      log('Server stuff');
+    log('Server stuff');
   }
   else {
     log('Client stuff');
     sync_srm_cnfg();
   }
+  
 });
 
 
