@@ -1,7 +1,7 @@
 {
   "name": "gemini-stream",
   "productName": "Gemini Stream",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Game Pass streaming companion",
   "main": "src/index.js",
   "scripts": {
@@ -24,6 +24,9 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "runAfterFinish": false
     }
   },
   "keywords": [],

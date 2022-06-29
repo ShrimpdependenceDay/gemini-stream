@@ -2,6 +2,8 @@ var app_table;
 var this_is_server;
 var export_results_open = false;
 
+// Haven't got around to adding commments here yet. Good luck, soldier.
+
 function isNumberKey(txt, evt) {
   var charCode = (evt.which) ? evt.which : evt.keyCode;
   if (charCode == 46) {
@@ -45,9 +47,6 @@ function save_settings () {
     else {
         $(".this_port_disp").text($("#client_port").val());
     }
-
-
-    
     window.api.send("save_settings", settings)
 }
 
@@ -205,7 +204,7 @@ function init() {
     this_is_server = data.is_server;
     window.api.send("main_init", data);
 
-    
+
     // Add click handlers for folder buttons
     $("button.get_path").on("click", function(){
         // Get ID of corresponding input
@@ -214,7 +213,7 @@ function init() {
         // Send open dialog command back to main, with the input ID
         data = {
             input_id: input,
-            is_file: $(this).hasClass('file') 
+            is_file: $(this).hasClass('file')
         }
         window.api.send("get_path", data);
       });
@@ -253,7 +252,7 @@ window.api.receive("load_settings", (data) => {
                         $(this).closest('tr').remove();
                         save_settings();
                     });
-                    
+
                     // Add input handlers
                     $("input.known_app").on('input', function(){
                         save_settings();
@@ -344,7 +343,6 @@ window.api.receive("fetch_result", (result_data) => {
 
                 open_results_page();
             }
-
         }
     }, 500)
 });
@@ -420,18 +418,18 @@ window.api.receive("cpu_count", (data) => {
 });
 
 window.api.receive("init_from_main", (data) => {
-    
+
     $('input#thread_cnt').attr({'max': data.cpu_count});
     $(".this_device_name").text(data.device_name);
     $(".this_device_ip_address").text(data.ip_address);
-    
+
     if (data.is_server){
         $(".that_device_ip_address").text(data.client_ip);
         if (data.setting_validities.client_ip){
-            $(".that_device_ip_address").removeClass("invalid");        
+            $(".that_device_ip_address").removeClass("invalid");
         }
         else{
-            $(".that_device_ip_address").addClass("invalid");        
+            $(".that_device_ip_address").addClass("invalid");
         }
 
         $(".this_port_disp").text(data.server_port);
@@ -473,10 +471,10 @@ window.api.receive("settings_validities", (data) => {
     }
 
     if (data.client_ip){
-        $(".that_device_ip_address").removeClass("invalid");        
+        $(".that_device_ip_address").removeClass("invalid");
     }
     else{
-        $(".that_device_ip_address").addClass("invalid");        
+        $(".that_device_ip_address").addClass("invalid");
     }
 
 });

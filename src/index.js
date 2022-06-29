@@ -33,6 +33,7 @@ var socket;
 var cpu_count = os.cpus().length;
 var app_data = process.env.LOCALAPPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
 var app_list_path = path.resolve(usr_data_path, 'app_list.json');
+var games_dir = path.resolve(usr_data_path, 'games');
 var manifests_dir_path = path.resolve(usr_data_path, 'srm_manifests');
 var srm_manifest_path = path.resolve(manifests_dir_path, 'gemini_stream_manifest.json');
 var box_art_filname = 'box-art.png';
@@ -82,7 +83,7 @@ process.on('uncaughtException', function (error) {
   // loading screen. As it is, the loading screen stays forever
   // if there is a connection error during sync
 
-  if (error.code == 'ECONNREFUSED' || 
+  if (error.code == 'ECONNREFUSED' ||
       error.code == 'EINVAL' ||
       error.code == 'ECONNRESET' ||
       error.code == 'ECONNABORTED' ||
@@ -146,7 +147,7 @@ const createWindow = () => {
       nodeIntegration: false, // is default value after Electron v5
       contextIsolation: true, // protect against prototype pollution
       enableRemoteModule: false, // turn off remote
-      preload: path.join(__dirname, "preload.js")    
+      preload: path.join(__dirname, "preload.js")
     },
     icon: path.join(__dirname, "build", os.platform() === 'win32' ? 'icon.ico' : 'background.png'),
   });
@@ -159,7 +160,6 @@ const createWindow = () => {
     mainWindow.webContents.openDevTools();
   }
 };
-
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -195,7 +195,7 @@ app.on('activate', () => {
 function create_debug_log(){
   if (log_open) {
     return;
-  }  
+  }
 
   // Create the browser window.
   debugWindow = new BrowserWindow({
@@ -206,7 +206,7 @@ function create_debug_log(){
       nodeIntegration: false, // is default value after Electron v5
       contextIsolation: true, // protect against prototype pollution
       enableRemoteModule: false, // turn off remote
-      preload: path.join(__dirname, "debug_preload.js")    
+      preload: path.join(__dirname, "debug_preload.js")
     }
   });
 
@@ -234,37 +234,52 @@ function log(message) {
     return;
   }
   var d = new Date();
-  
+
   var dt_string = '[' + d.toLocaleString() + '] '
   debugWindow.webContents.send("message", dt_string + message);
 }
 
 
+// Get Display Name and list of IDs for the
+// given application object
 function get_display_name_and_id(app_object){
   return new Promise(function (resolve, reject) {
+    // Command to get display name and IDs
     var combined_command = "$manifest = Get-AppxPackage '" + app_object.Name + "' |Get-AppxPackageManifest ; $displayName = $manifest.Package.Properties.DisplayName; $displayName ; $ids = $manifest.Package.Applications.Application.Id ; $ids ;"
-  
+
     var all_data = "";
     var child_proc = spawn("powershell.exe", args=[combined_command]);
-    
+
+    // Join all data from powershell command
     child_proc.stdout.on("data",function(data){
       all_data = all_data + data.toString();
     });
-  
+
+    // Once the display name + ID process completes...
     child_proc.on("exit", function(code) {
       all_data = all_data.trim().split('\r\n');
-  
+
+      // Display name comes back in the first line,
+      // IDs make up the rest
       var display_name = all_data[0]
       var apx_ids = all_data.slice(1);
-  
+
+      // If this is one of the configured known apps,
+      // replace the display name with the pre-set string
       if (app_object.Name in current_settings.known_apps){
         display_name = current_settings.known_apps[app_object.Name];
       }
 
+      // If the display name contains "ms-resouce", that almost
+      // definitely means we didn't get a valid name back, so
+      // set it to "~Unknown" (use the tilde for sorting)
       if (display_name.includes("ms-resource")){
         display_name = "~Unknown";
       }
-  
+
+      // Each ID we got back represents a command, so add an app
+      // to the list of apps for each ID. The command is made up
+      // of the PackageFamilyName and an ID separated by a !
       for (const id of apx_ids){
         var this_app = {
           Name: app_object.Name,
@@ -274,13 +289,13 @@ function get_display_name_and_id(app_object){
           DisplayName: display_name,
           command: app_object.PackageFamilyName + "!" + id
         }
-  
         app_list.push(this_app);
       }
-
+      // Resolve this promise
       resolve(code);
     });
 
+    // Reject promise on error
     child_proc.on("error", function (err) {
       reject(err);
     });
@@ -289,13 +304,18 @@ function get_display_name_and_id(app_object){
 }
 
 
+// Fetch installed applications
 function fetch_installed_apps(){
+  // These are the keys we care about from the
+  // Get-AppxPackage output
   const wanted_keys = [
       'Name',
       'PackageFamilyName',
       'InstallLocation'
   ]
 
+  // If any of these strings show up in the Name field,
+  // skip them. They're always system applications.
   const filters = [
       'Microsoft .Net Native',
       'Microsoft.NET',
@@ -307,6 +327,7 @@ function fetch_installed_apps(){
       'Microsoft.DirectX',
   ]
 
+  // Init data to send to renderer
   var fetch_data = {
     code: 1,
     message: "",
@@ -317,22 +338,26 @@ function fetch_installed_apps(){
   // fields into multiple lines. This regex replaces
   // those line breaks with a space
   const rep_re = / *\n +/g;
-  
+
   app_list = [];
   current_apps = 0;
   var all_data = "";
   var apx_list = [];
   var index = -1;
+
+  // Start the command to get info on all installed apps,
+  // and set the progress bar to indeterminate (>1)
   var child_proc = spawn("powershell.exe", args=["Get-AppxPackage"]);
   mainWindow.setProgressBar(2);
-
   child_proc.stdout.on("data",function(data){
       all_data = all_data + data.toString();
   });
 
+  // Once the process finishes, we can parse out the data
+  // to a JavaScript object
   child_proc.on("close", function(code) {
       var skip_item = false;
-      
+
       // Split all data up by lines
       all_data = all_data.replace(rep_re, " ");
       all_data = all_data.split("\r\n");
@@ -343,6 +368,9 @@ function fetch_installed_apps(){
               continue;
           }
 
+          // Lines are made up of a key value pair separated by
+          // a colon. Colons also often appear in the value, so
+          // only split the first one.
           var line_parts = line.split(/:/);
           var key = line_parts.shift().trim();
           var value = line_parts.join(":").trim();
@@ -394,6 +422,8 @@ function fetch_installed_apps(){
       var all_promises = [];
       total_apps = apx_list.length;
       for (const app of apx_list){
+
+        // Get a promise from the name & ID function for this app.
         var app_promise = get_display_name_and_id(app);
         app_promise.then(function(code) {
           log("Fetched " + app.Name);
@@ -403,18 +433,21 @@ function fetch_installed_apps(){
         .catch(function(err){
           log("Get info failed - " + err + " - " + app);
         });
+
+        // Add this promise to the collection of all promises
         all_promises.push(app_promise);
       }
 
       Promise.all(all_promises)
         .then(codes => {
-          // All child processes are complete. Dump the apps to app_list.json.
+          // All child processes are complete. Dump the apps to app_list.json
+          // and clear the progress bar (<0)
           log("All child procs done");
           mainWindow.setProgressBar(-1);
 
-          // Sort app list by display name
+          // Sort app list by display name, then dump the list
+          // to app_list.json
           app_list.sort((a, b) => (a.DisplayName > b.DisplayName ? 1 : -1))
-
           fs.writeFile(app_list_path, JSON.stringify(app_list), (err) => {
             if (err) {
               fetch_data.message = err;
@@ -422,6 +455,8 @@ function fetch_installed_apps(){
               mainWindow.webContents.send("fetch_result", fetch_data);
               throw(err);
             }
+
+            // Success! Send the result to the renderer
             log("Dumped app list to " + app_list_path);
             fetch_data.code = 0;
             mainWindow.webContents.send("fetch_result", fetch_data);
@@ -430,6 +465,8 @@ function fetch_installed_apps(){
           });
         })
         .catch(error => {
+          // Failure... Send the bad news
+          // Code should still be -1 from init
           mainWindow.setProgressBar(-1);
           log("Failure in child procs: " + error)
           fetch_data.message = error;
@@ -442,7 +479,6 @@ function fetch_installed_apps(){
 
 
 function update_connection(){
-
   var data = {
     is_server: this_is_server,
     connected: connected,
@@ -455,9 +491,9 @@ function update_connection(){
     // Get list of shortcuts in Shield Apps
     if(setting_validities.shield_apps_dir) {
       var shield_apps_contents = fs.readdirSync(current_settings.shield_apps_dir);
-      
-      // For each item in the Shield Apps directory, 
-      // check to see if the application name was also found in 
+
+      // For each item in the Shield Apps directory,
+      // check to see if the application name was also found in
       // the list of Gemini simulated games. If so, it is probably
       // a game available for streaming, so we can push it to the client
       for (const item of shield_apps_contents){
@@ -538,7 +574,7 @@ function update_connection(){
             synced_games: [],
             srm_loc_valid: false
           }
-          
+
           // Get JSON from socket message
           rx_data = JSON.parse(data_str);
           mainWindow.webContents.send("sync_start");
@@ -604,18 +640,19 @@ function update_connection(){
           sock.write(sync_data_str);
         }
       });
-  
+
       sock.on('close', (data) => {
         log(`connection closed: ${sock.remoteAddress}:${sock.remotePort}`);
         connected = false;
         socket_clients.splice(socket_clients.indexOf(sock), 1);
       });
-  
+
     }).listen(port, host);
-  
+
   log(`Server listening on ${host}:${port}`);
   }
 }
+
 
 function init_socket_client(){
   socket = new net.Socket();
@@ -664,7 +701,7 @@ function close_socket_server(){
 
 // Get path from user
 const get_user_path = async (input, is_file) => {
-  
+
   // Set dialog properties based on whether we
   // need to get a file or directory
   if (is_file){
@@ -675,7 +712,7 @@ const get_user_path = async (input, is_file) => {
   }
 
   const dialog_ret = await dialog.showOpenDialog(mainWindow, {
-      // The Configuration object sets different properties on the Open File Dialog 
+      // The Configuration object sets different properties on the Open File Dialog
     properties: dialog_props
   });
 
@@ -684,7 +721,7 @@ const get_user_path = async (input, is_file) => {
     return;
   }
 
-  // Send selected path back to renderer, along with the 
+  // Send selected path back to renderer, along with the
   // input ID we received, so renderer can assign the path correctly
   var data = {
     dir: dialog_ret.filePaths[0],
@@ -834,14 +871,14 @@ function sync_srm_cnfg() {
 
   // If the SRM user config file doesn't exist yet, create it
   if(!fs.existsSync(steam_rm_cnfg_path)){
-    fs.mkdirSync(path.resolve(os.homedir(), '.config/steam-rom-manager/userData'), options={recursive: true});    
+    fs.mkdirSync(path.resolve(os.homedir(), '.config/steam-rom-manager/userData'), options={recursive: true});
     var srm_usr_cnfg = [];
   }
   else{
     // Open SRM user configs, try to find the Gemini Stream config,
     // and replace it with our template
     var srm_usr_cnfg = JSON.parse(fs.readFileSync(steam_rm_cnfg_path));
-    
+
     var existing_cnfg = srm_usr_cnfg.find(cnfg => cnfg.configTitle === "Gemini Stream");
     if (existing_cnfg){
       log("Found existing SRM user config");
@@ -870,10 +907,12 @@ ipcMain.on("request_current_settings", (event, args) => {
   mainWindow.webContents.send("load_settings", current_settings);
 });
 
+
 // Request from renderer for app list
 ipcMain.on("request_load_app_list", (event, args) => {
   mainWindow.webContents.send("load_app_list", app_list_path);
 });
+
 
 // Reset settings
 ipcMain.on("reset_settings", (event, args) => {
@@ -918,7 +957,7 @@ ipcMain.on("main_init", (event, data) => {
   for (let setting in current_settings ){
     var fetched_setting_val = store.get(setting);
 
-    // If a setting isn't in the config file, 
+    // If a setting isn't in the config file,
     // set it to the default setting then save
     // the default setting to the config file.
     if (fetched_setting_val == undefined){
@@ -929,7 +968,7 @@ ipcMain.on("main_init", (event, data) => {
       current_settings[setting] = fetched_setting_val;
     }
   }
-  
+
   validate_settings(current_settings);
 
   // If this is client and Moonlight host is not valid, open settings page
@@ -985,7 +1024,7 @@ ipcMain.on("toMain", (event, args) => {
   log(args)
   setTimeout(() => {
     mainWindow.webContents.send("fromMain", "some other data");
-  }, 3000); 
+  }, 3000);
 });
 
 // Start Steam ROM Manager
@@ -999,13 +1038,13 @@ ipcMain.on("start_srm", (event, args) => {
 ipcMain.on("sync_to_client", (event, args) => {
   log('Received sync_to_client command')
   var tx_games = []
-  
+
   // Get list of shortcuts in Shield Apps
   if(setting_validities.shield_apps_dir) {
     var shield_apps_contents = fs.readdirSync(current_settings.shield_apps_dir);
-    
-    // For each item in the Shield Apps directory, 
-    // check to see if the application name was also found in 
+
+    // For each item in the Shield Apps directory,
+    // check to see if the application name was also found in
     // the list of Gemini simulated games. If so, it is probably
     // a game available for streaming, so we can push it to the client
     for (const item of shield_apps_contents){
@@ -1039,12 +1078,13 @@ ipcMain.on("sync_to_client", (event, args) => {
   }
 });
 
+
 // Kick off a 1 second timer, at the end of which
 // settings will be saved
 ipcMain.on("save_settings", (event, args) => {
   log('Received "save_settings" command');
 
-  // If we receive this command, clear the 
+  // If we receive this command, clear the
   // current save_settings timer. Do this
   // so we aren't saving settings every
   // single time the user presses a key
@@ -1069,14 +1109,14 @@ ipcMain.on("save_settings", (event, args) => {
         }
       }
 
-      current_settings[setting] = args[setting]  
+      current_settings[setting] = args[setting]
     }
 
     // Validate the new settings
     validate_settings(current_settings);
 
     log('Saved settings');
-  }, 1000); 
+  }, 1000);
 
 });
 
@@ -1090,18 +1130,18 @@ ipcMain.on("fetch_apps", (event, args) => {
 
 // Get path from user
 // 'args' is an object, where input_id is the ID of the input
-// requesting the path, and is_file = True if file path is 
+// requesting the path, and is_file = True if file path is
 // requested, and False if it is a directory.
 // input_id is needed so, when a response is sent, we know
 // which input to populate.
 ipcMain.on("get_path", (event, args) => {
-
   log('Received "get_directory" from renderer ' + args.input_id);
 
   // Get path from user. Call external function because it must be async
   get_user_path(args.input_id, args.is_file);
 
 });
+
 
 // Take the provided list of applications and make
 // them streamable
@@ -1128,9 +1168,24 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
       application.DisplayName = application.DisplayName.replace(char, '')
     }
 
+    // Create folder for game in games dir
+    var this_game_dir = path.resolve(games_dir, application.DisplayName);
+    fs.mkdirSync(this_game_dir, options={recursive: true});
+
+    // Write bat file to start game in this game's directory
+    var bat_path = path.resolve(this_game_dir, application.DisplayName + ".bat");
+    fs.writeFile(bat_path, "explorer.exe shell:appsFolder\\" + application.command, (err) => {
+      if (err) {
+        log(err);
+        export_data.message = err;
+        mainWindow.webContents.send("export_result", export_data);
+        throw(err);
+      }
+    });
+
     // Create the shortcut for this game in the Shield Apps directory
     var shortcut_path = path.resolve(current_settings.shield_apps_dir, application.DisplayName) + ".lnk"
-    shell.writeShortcutLink(shortcut_path, {target: "explorer.exe", args: "shell:appsFolder\\" + application.command})
+    shell.writeShortcutLink(shortcut_path, {target: bat_path})
 
     // GeForce Experience also needs a game folder with box art in it to pick up shortcuts
     // Copy the default box-art.png to a new game folder for the app
@@ -1163,7 +1218,7 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
 
     export_data.games.push(application.DisplayName);
   }
-  
+
   // assign successful export data and send to renderer
   export_data.code = 0;
   mainWindow.webContents.send("export_result", export_data);

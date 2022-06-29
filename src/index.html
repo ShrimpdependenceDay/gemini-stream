@@ -8,7 +8,7 @@
     <style></style>
   </head>
   <body>
-    <div id="main_content" class="server" style="display:none;"> 
+    <div id="main_content" class="server" style="display:none;">
       <div class="device_info_parent">
         <div class="device_info_container">
           <h1>Host (This Device)</h1>
@@ -28,7 +28,7 @@
             </table>
           </div>
         </div>
-        
+
         <div class="device_info_container">
           <h1>Client</h1>
           <div class="device_info client_info">
@@ -72,7 +72,7 @@
             </table>
           </div>
         </div>
-        
+
         <div class="device_info_container">
           <h1>Client (This Device)</h1>
           <div class="device_info client_info">
@@ -93,10 +93,10 @@
         </div>
       </div>
     </div>
-    
+
     <div id="app_list_table" class="app_list_component"></div>
 
-    <div id="app_list_footer" class="app_list_component" style="display:none"> 
+    <div id="app_list_footer" class="app_list_component" style="display:none">
       <button id="export_selected_apps" onclick="export_selected_apps()" disabled="true">Export selected apps</button>
     </div>
 
@@ -106,7 +106,7 @@
         <svg viewBox="0 0 100 100">
           <defs>
             <filter id="shadow">
-              <feDropShadow dx="0" dy="0" stdDeviation="1.5" 
+              <feDropShadow dx="0" dy="0" stdDeviation="1.5"
                 flood-color="#fc6767"/>
             </filter>
           </defs>
@@ -121,7 +121,7 @@
         <h3>Results</h3>
         <button id="close-results" onclick="close_results_page()">&#10005;</button>
       </div>
-       
+
       <div id="results_content">
         <p id="results_message"></p>
       </div>
@@ -139,7 +139,7 @@
         <h3>Settings</h3>
         <button id="close-settings" onclick="close_settings_page()">&#10005;</button>
       </div>
-       
+
       <div id="settings_content" class="server">
         <div class="settings-input"><p class="settings-label">Client IP Address</p><input type="text" class="settings" id="client_ip" name="client_ip" onkeypress="return isNumberKey(this, event);"></div>
         <div class="settings-input"><p class="settings-label">Port</p><input type="number" class="settings" id="server_port" name="server_port" min="0" max="65535"></div>
@@ -190,7 +190,7 @@
 
     <!-- Insert this line above local script tags  -->
     <script>if (typeof module === 'object') {window.module = module; module = undefined;}</script>
-    
+
     <!-- normal script imports etc  -->
     <script>
       /*------------------------------------------------------
@@ -226,7 +226,7 @@
     </script>
 
     <script type="text/javascript" src="../node_modules/tabulator-tables/dist/js/tabulator.min.js"></script>
-    <script src="jquery-3.4.1.js"></script>    
+    <script src="jquery-3.4.1.js"></script>
     <script src="renderer.js"></script>
 
     <!-- Insert this line after script tags -->

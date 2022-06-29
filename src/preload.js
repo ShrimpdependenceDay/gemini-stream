@@ -53,7 +53,7 @@ contextBridge.exposeInMainWorld(
                 "init_from_main",
             ];
             if (validChannels.includes(channel)) {
-                // Deliberately strip event as it includes `sender` 
+                // Deliberately strip event as it includes `sender`
                 ipcRenderer.on(channel, (event, ...args) => func(...args));
             }
         },
@@ -69,7 +69,7 @@ contextBridge.exposeInMainWorld(
 contextBridge.exposeInMainWorld(
     "tabulator", {
         app_table: (container_selector, constructor) => {
-            
+
             var new_table = new Tabulator(container_selector, constructor);
             new_table.on("rowSelected", function(row){
                 var checkedBoxes = document.querySelectorAll('.tabulator-cell input:checked');

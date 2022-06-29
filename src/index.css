@@ -136,7 +136,7 @@ div.settings_path_container{
 input.settings.path {
   width: 600px;
   border-radius: 4px 0px 0px 4px;
-  pointer-events: none; 
+  pointer-events: none;
 }
 
 input.settings#moonlight_options {
