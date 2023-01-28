@@ -1,7 +1,7 @@
 {
   "name": "gemini-stream",
   "productName": "Gemini Stream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Game Pass streaming companion",
   "main": "src/index.js",
   "scripts": {

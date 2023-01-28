@@ -21,12 +21,16 @@ var store = new Store();
 var update_connection_prdc;
 var usr_data_path = app.getPath('userData');
 var save_settings_timeout = null;
+var already_crashing;
+var dev_env = !__dirname.includes("app.asar");
+const DEV_MENU_STRING = "Dev";
 
 // Stream client variables
 var server;
 var stream_client_ready = false;
 var socket_clients = [];
 var steam_rm_cnfg_path = path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json');
+const OPEN_MANIFESTS_STRING = "Open manifests directory";
 
 // Stream server variables
 var socket;
@@ -41,10 +45,14 @@ var box_art_path = path.resolve(__dirname, "icons", box_art_filname);
 var log_open = false;
 var app_list = [];
 var current_apps = 0;
+const GAMESTREAM_HOST = "NVIDIA GameStream";
+const SUNSHINE_HOST = "Sunshine";
+var valid_hosts = [ GAMESTREAM_HOST, SUNSHINE_HOST ];
 
 // Default settings
 var default_settings = {
   shield_apps_dir: path.join(app_data, 'NVIDIA Corporation', 'Shield Apps'),
+  sunshine_apps: "C:/Program Files/Sunshine/config/apps.json",
   known_apps: {
     'Microsoft.SeaofThieves': 'Sea of Thieves',
     'Microsoft.DeltaPC': 'Gears of War: Ultimate Edition',
@@ -57,19 +65,22 @@ var default_settings = {
   client_ip: "192.168.x.x",
   server_port: 5056,
   client_port: 5056,
-  srm_location: "/home/deck/Desktop/Steam-ROM-Manager.AppImage"
+  srm_location: "/home/deck/.local/share/applications/SRM.desktop",
+  stream_host: SUNSHINE_HOST
 }
 
 // Current settings
 var current_settings = {
   shield_apps_dir: null,
+  sunshine_apps: "",
   known_apps: {},
   host_name: '',
   moonlight_options: '',
   client_ip: '',
   server_port: 0,
   client_port: 0,
-  srm_location: ""
+  srm_location: "",
+  stream_host: ""
 }
 
 // Settings validities
@@ -77,6 +88,10 @@ var setting_validities = {};
 
 // Error handling
 process.on('uncaughtException', function (error) {
+  if(already_crashing){
+    log("ALREADY CRASHING");
+    return;
+  }
 
   // TODO - Record connection errors in connection data somehow,
   // so when updated data is sent to the renderer, we can hide the
@@ -84,6 +99,7 @@ process.on('uncaughtException', function (error) {
   // if there is a connection error during sync
 
   if (error.code == 'ECONNREFUSED' ||
+      error.code == 'EACCES' ||
       error.code == 'EINVAL' ||
       error.code == 'ECONNRESET' ||
       error.code == 'ECONNABORTED' ||
@@ -93,15 +109,30 @@ process.on('uncaughtException', function (error) {
     log('Client not available - ' + error.code);
     connected = false;
   }
+  else if ( error.code == 'ERR_SOCKET_BAD_PORT'){
+    setting_validities.server_port = false;
+  }
   else {
+    already_crashing = true;
     log("ERROR: " + error);
-    mainWindow.setProgressBar(-1);
-    throw(error);
+    log(error.stack);
+
+    const messageBoxOptions = {
+      type: "error",
+      title: error.code,
+      message: error.message
+    };
+    dialog.showMessageBoxSync(messageBoxOptions);
+
+    // I believe it used to be the case that doing a "throw err;" here would
+    // terminate the process, but now it appears that you have to use's Electron's
+    // app module to exit (process.exit(1) seems to not terminate the process)
+    app.exit(1);
   }
 });
 
 // Toolbar configuration
-const template = [
+const toolbar_template = [
   {
     label: 'File',
     submenu: [
@@ -117,14 +148,37 @@ const template = [
           create_debug_log();
         }
       },
-
-
+      {
+        label: OPEN_MANIFESTS_STRING,
+        click: () => {
+          spawn("dolphin", args=[manifests_dir_path]);
+        }
+      },
       { role: 'quit' }
     ]
   },
+  {
+    label: 'Help',
+    submenu: [
+      {
+        label: 'About',
+        click: () => {
+          show_about();
+        }
+      },
+      {
+        label: 'Documentation',
+        click: () => {
+          shell.openExternal("https://github.com/ShrimpdependenceDay/gemini-stream#readme");
+        }
+      }
+    ]
+  }
 ]
-const menu = Menu.buildFromTemplate(template)
-Menu.setApplicationMenu(menu)
+const menu = Menu.buildFromTemplate(toolbar_template);
+var manifests_item = menu.items[0].submenu.items.find(item => item.label === OPEN_MANIFESTS_STRING)
+manifests_item.visible = false;
+Menu.setApplicationMenu(menu);
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -156,9 +210,17 @@ const createWindow = () => {
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   // Open the DevTools.
-  if(!__dirname.includes("app.asar")){
+  if(dev_env){
     mainWindow.webContents.openDevTools();
   }
+
+  mainWindow.on('close', function() {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+    app.exit();
+  });
+
 };
 
 // This method will be called when Electron has finished
@@ -170,6 +232,7 @@ app.on('before-quit', function() {
   if (!this_is_server){
     close_socket_server();
   }
+  clearInterval(update_connection_prdc);
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -191,6 +254,63 @@ app.on('activate', () => {
     createWindow();
   }
 });
+
+// This function will output the lines from the script
+// and will return the full combined output
+// as well as exit code when it's done (using the callback).
+function run_script(command, args, callback) {
+  var child = spawn(command, args, {
+      encoding: 'utf8',
+      shell: true
+  });
+  // You can also use a variable to save the output for when the script closes later
+  child.on('error', (error) => {
+      dialog.showMessageBox({
+          title: 'Title',
+          type: 'warning',
+          message: 'Error occured.\r\n' + error
+      });
+  });
+
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (data) => {
+      //Here is the output
+      data=data.toString();
+      console.log(data);
+  });
+
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (data) => {
+      // Return some data to the renderer process with the mainprocess-response ID
+      mainWindow.webContents.send('mainprocess-response', data);
+      //Here is the output from the command
+      console.log(data);
+  });
+
+  child.on('close', (code) => {
+      //Here you can get the exit code of the script
+      switch (code) {
+          case 0:
+              dialog.showMessageBox({
+                  title: 'Title',
+                  type: 'info',
+                  message: 'End process.\r\n'
+              });
+              break;
+      }
+
+  });
+  if (typeof callback === 'function')
+      callback();
+}
+
+function add_manifests_menu_item(){
+  if (!fs.existsSync(manifests_dir_path)){
+    return;
+  }
+  var manifests_item = menu.items[0].submenu.items.find(item => item.label === OPEN_MANIFESTS_STRING)
+  manifests_item.visible = true;
+}
 
 function create_debug_log(){
   if (log_open) {
@@ -216,7 +336,7 @@ function create_debug_log(){
   debugWindow.setMenuBarVisibility(false)
 
   // Open the DevTools.
-  if(!__dirname.includes("app.asar")){
+  if(dev_env){
     debugWindow.webContents.openDevTools();
   }
 
@@ -229,14 +349,18 @@ function create_debug_log(){
 }
 
 function log(message) {
-  console.log(message);
-  if (!log_open || !debugWindow){
-    return;
-  }
-  var d = new Date();
+  try {
+    console.log(message);
+    if (!log_open || !debugWindow){
+      return;
+    }
+    var d = new Date();
 
-  var dt_string = '[' + d.toLocaleString() + '] '
-  debugWindow.webContents.send("message", dt_string + message);
+    var dt_string = '[' + d.toLocaleString() + '] '
+    debugWindow.webContents.send("message", dt_string + message);
+  } catch (error) {
+
+  }
 }
 
 
@@ -487,9 +611,17 @@ function update_connection(){
 
   // if this is the server, check if there are games available
   if (this_is_server) {
-    var games_check = [];
+
+    var game_count = 0;
+
+    // Get list of games in Sunshine apps
+    if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
+      var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      game_count = sunshine_json.apps.length;
+    }
+
     // Get list of shortcuts in Shield Apps
-    if(setting_validities.shield_apps_dir) {
+    else if( current_settings.stream_host == GAMESTREAM_HOST && setting_validities.shield_apps_dir) {
       var shield_apps_contents = fs.readdirSync(current_settings.shield_apps_dir);
 
       // For each item in the Shield Apps directory,
@@ -498,15 +630,16 @@ function update_connection(){
       // a game available for streaming, so we can push it to the client
       for (const item of shield_apps_contents){
         if (item.endsWith(".lnk")) {
-          var shield_app_game_name = item.split('.')[0]
-          games_check.push(shield_app_game_name)
+          // var shield_app_game_name = item.split('.')[0]
+          game_count += 1;
         }
       }
     }
+
     // If we have at least one game,
     // send message via socket. Pre-pend with sync request
     // so client knows exactly what this is
-    if (games_check.length > 0) {
+    if ( game_count > 0) {
       data.games_avail = true;
     }
   }
@@ -590,6 +723,7 @@ function update_connection(){
                   return;
               }
               log('Manifests directory created successfully');
+              add_manifests_menu_item();
               return;
             });
           }
@@ -744,11 +878,16 @@ function validate_settings (settings) {
     setting_validities[setting] = false;
 
     // assert reminder for new config items
-    assert.equal(8, Object.keys(default_settings).length);
+    assert.equal(10, Object.keys(default_settings).length);
     switch(setting) {
       // Shield Apps directory - must exist
       case 'shield_apps_dir':
         setting_validities[setting] = fs.existsSync(settings[setting]);
+        break;
+
+      // Sunshine apps.json - must exist and be called 'apps.json'
+      case 'sunshine_apps':
+        setting_validities[setting] = (fs.existsSync(settings[setting]) && settings[setting].endsWith('json') && settings[setting].includes("apps"));
         break;
 
       // Known applications - always valid
@@ -761,9 +900,9 @@ function validate_settings (settings) {
         setting_validities[setting] = true;
         break;
 
-      // Steam Rom Manager location - must exist and be called 'Steam-ROM-Manager.AppImage'
+      // Steam Rom Manager location - must exist
       case 'srm_location':
-        setting_validities[setting] = (fs.existsSync(settings[setting]) && settings[setting].endsWith('AppImage') && settings[setting].includes("Steam-ROM-Manager"));
+        setting_validities[setting] = (fs.existsSync(settings[setting]));
         break;
 
       // Moonlight host name - non-empty
@@ -780,12 +919,18 @@ function validate_settings (settings) {
 
       // Server port - in range
       case 'server_port':
-        setting_validities[setting] = (settings[setting] >= 0 && settings[setting] <= 65535);
+        setting_validities[setting] = (settings[setting] && settings[setting] >= 0 && settings[setting] <= 65535);
+        log("Server port: " + settings[setting])
         break;
 
       // Client port - in range
       case 'client_port':
         setting_validities[setting] = (settings[setting] >= 0 && settings[setting] <= 65535);
+        break;
+
+      // Stream host - Sunshine or NVIDIA GameStream
+      case 'stream_host':
+        setting_validities[setting] = valid_hosts.includes(settings[setting]);
         break;
 
       default:
@@ -794,6 +939,15 @@ function validate_settings (settings) {
     }
   }
   mainWindow.webContents.send("settings_validities", setting_validities);
+}
+
+function show_about(){
+  dialog.showMessageBox({
+    title: `About ${app.getName()}`,
+    message: `${app.getName()} ${app.getVersion()}`,
+    // detail: `Created by ${pkg.author.name}`
+    // icon: path.join(__dirname, '..', 'static/Icon.png'),
+   });
 }
 
 function sync_srm_cnfg() {
@@ -1015,6 +1169,7 @@ ipcMain.on("main_init", (event, data) => {
   else {
     log('Client stuff');
     sync_srm_cnfg();
+    add_manifests_menu_item();
   }
 });
 
@@ -1039,42 +1194,53 @@ ipcMain.on("sync_to_client", (event, args) => {
   log('Received sync_to_client command')
   var tx_games = []
 
-  // Get list of shortcuts in Shield Apps
-  if(setting_validities.shield_apps_dir) {
-    var shield_apps_contents = fs.readdirSync(current_settings.shield_apps_dir);
 
-    // For each item in the Shield Apps directory,
-    // check to see if the application name was also found in
-    // the list of Gemini simulated games. If so, it is probably
-    // a game available for streaming, so we can push it to the client
-    for (const item of shield_apps_contents){
-      if (item.endsWith(".lnk")) {
-        var shield_app_game_name = item.split('.')[0]
-        tx_games.push(shield_app_game_name)
+    // Get list of games from Sunshine apps
+    if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
+      var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      log(sunshine_json.apps.length);
+
+      for (const game of sunshine_json.apps){
+        tx_games.push(game.name)
       }
     }
 
-    // If we have at least one game,
-    // send message via socket. Pre-pend with sync request
-    // so client knows exactly what this is
-    if (tx_games.length > 0) {
-      var tx_data = {
-        id: "GEMINI_SYNC_REQUEST",
-        games: tx_games
-      }
+    // Get list of shortcuts in Shield Apps
+    else if( current_settings.stream_host == GAMESTREAM_HOST && setting_validities.shield_apps_dir) {
+      var shield_apps_contents = fs.readdirSync(current_settings.shield_apps_dir);
 
-      var tx_data_str = JSON.stringify(tx_data);
-
-      log('Games to transmit: ' + tx_games);
-      socket.write(tx_data_str);
-    }
-    else {
-      log('No games to sync');
-      data = {
-        success: true
+      // For each item in the Shield Apps directory,
+      // check to see if the application name was also found in
+      // the list of Gemini simulated games. If so, it is probably
+      // a game available for streaming, so we can push it to the client
+      for (const item of shield_apps_contents){
+        if (item.endsWith(".lnk")) {
+          var shield_app_game_name = item.split('.')[0]
+          tx_games.push(shield_app_game_name)
+        }
       }
-      mainWindow.webContents.send("sync_result", data);
     }
+
+  // If we have at least one game,
+  // send message via socket. Pre-pend with sync request
+  // so client knows exactly what this is
+  if (tx_games.length > 0) {
+    var tx_data = {
+      id: "GEMINI_SYNC_REQUEST",
+      games: tx_games
+    }
+
+    var tx_data_str = JSON.stringify(tx_data);
+
+    log('Games to transmit: ' + tx_games);
+    socket.write(tx_data_str);
+  }
+  else {
+    log('No games to sync');
+    data = {
+      success: true
+    }
+    mainWindow.webContents.send("sync_result", data);
   }
 });
 
@@ -1146,6 +1312,13 @@ ipcMain.on("get_path", (event, args) => {
 // Take the provided list of applications and make
 // them streamable
 ipcMain.on("export_selected_apps", (event, selected_apps) => {
+  var template = {
+      name: "",
+      output: "",
+      cmd: "",
+      detached: []
+  };
+  template["image-path"] = "";
 
   log('Received "export_selected_apps" from renderer');
   log(selected_apps);
@@ -1168,59 +1341,113 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
       application.DisplayName = application.DisplayName.replace(char, '')
     }
 
-    // Create folder for game in games dir
-    var this_game_dir = path.resolve(games_dir, application.DisplayName);
-    fs.mkdirSync(this_game_dir, options={recursive: true});
-
-    // Write bat file to start game in this game's directory
-    var bat_path = path.resolve(this_game_dir, application.DisplayName + ".bat");
-    fs.writeFile(bat_path, "explorer.exe shell:appsFolder\\" + application.command, (err) => {
-      if (err) {
-        log(err);
-        export_data.message = err;
-        mainWindow.webContents.send("export_result", export_data);
-        throw(err);
+    // Sunshine export
+    if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
+      // Open Sunshine apps.json and see if the current game is already in the list
+      var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      if (!sunshine_json.hasOwnProperty('apps') || !Array.isArray(sunshine_json.apps) ){
+        sunshine_json.apps = [];
       }
-    });
 
-    // Create the shortcut for this game in the Shield Apps directory
-    var shortcut_path = path.resolve(current_settings.shield_apps_dir, application.DisplayName) + ".lnk"
-    shell.writeShortcutLink(shortcut_path, {target: bat_path})
+      var existing_cnfg = sunshine_json.apps.find(cnfg => cnfg.name === application.DisplayName);
+      if (existing_cnfg){
+        // Found an existing config for this game, so just
+        // update the detached command for it
+        log("Found " + application.DisplayName + " in " + current_settings.sunshine_apps);
+        existing_cnfg.detached = [ "explorer.exe shell:appsFolder\\" + application.command ]
+      }
+      else{
+        // Did not find any existing config, so populate the template
+        // and push it to the sunshine json
+        template.name = application.DisplayName;
+        template.detached = [ "explorer.exe shell:appsFolder\\" + application.command ];
+        sunshine_json.apps.push(template)
+      }
 
-    // GeForce Experience also needs a game folder with box art in it to pick up shortcuts
-    // Copy the default box-art.png to a new game folder for the app
-    var shield_assets_dir = path.resolve(current_settings.shield_apps_dir, 'StreamingAssets');
-    var game_asset_dir = path.resolve(shield_assets_dir, application.DisplayName)
-    var game_box_art = path.resolve(game_asset_dir, box_art_filname)
-    if (!fs.existsSync(shield_assets_dir)){
-      // make assets directory
-      fs.mkdirSync(shield_assets_dir, (err) => {
+      // Write the updated JSON data
+      fs.writeFileSync(current_settings.sunshine_apps, JSON.stringify(sunshine_json, null, 4), (err) => {
         if (err) {
-            log(err);
-            export_data.message = err;
-            mainWindow.webContents.send("export_result", export_data);
-            throw(err);
+          // We got an error, so pass that on to the renderer for display
+          export_data.message = err;
+          mainWindow.webContents.send("export_result", export_data);
+          log(err);
+          throw(err);
+        }
+        if (existing_cnfg){
+          log("Updated Sunshine apps.json entry for " + application.DisplayName);
+        }
+        else{
+          log("Added Sunshine apps.json entry for " + application.DisplayName);
+        }
+        log(current_settings.sunshine_apps);
+      });
+      export_data.games.push(application.DisplayName);
+    }
+    else if( current_settings.stream_host == SUNSHINE_HOST && !setting_validities.sunshine_apps) {
+      export_data.message = "Invalid Sunshine apps path: " + current_settings.sunshine_apps;
+      log(export_data.message);
+      mainWindow.webContents.send("export_result", export_data);
+      mainWindow.setProgressBar(-1);
+      return;
+    }
+
+    // GameStream export
+    else if( current_settings.stream_host == GAMESTREAM_HOST && setting_validities.shield_apps_dir) {
+      // Create folder for game in games dir
+      var this_game_dir = path.resolve(games_dir, application.DisplayName);
+      fs.mkdirSync(this_game_dir, options={recursive: true});
+
+      // Write bat file to start game in this game's directory
+      var bat_path = path.resolve(this_game_dir, application.DisplayName + ".bat");
+      fs.writeFile(bat_path, "explorer.exe shell:appsFolder\\" + application.command, (err) => {
+        if (err) {
+          log(err);
+          export_data.message = err;
+          mainWindow.webContents.send("export_result", export_data);
+          throw(err);
         }
       });
-    }
-    if (!fs.existsSync(game_asset_dir)){
-      // make directory for this game
-      fs.mkdirSync(game_asset_dir, (err) => {
-        if (err) {
-            log(err);
-            export_data.message = err;
-            mainWindow.webContents.send("export_result", export_data);
-            throw(err);
-        }
-      });
-    }
-    fs.copyFileSync(box_art_path, game_box_art);
 
-    export_data.games.push(application.DisplayName);
+      // Create the shortcut for this game in the Shield Apps directory
+      var shortcut_path = path.resolve(current_settings.shield_apps_dir, application.DisplayName) + ".lnk"
+      shell.writeShortcutLink(shortcut_path, {target: bat_path})
+
+      // GeForce Experience also needs a game folder with box art in it to pick up shortcuts
+      // Copy the default box-art.png to a new game folder for the app
+      var shield_assets_dir = path.resolve(current_settings.shield_apps_dir, 'StreamingAssets');
+      var game_asset_dir = path.resolve(shield_assets_dir, application.DisplayName)
+      var game_box_art = path.resolve(game_asset_dir, box_art_filname)
+      if (!fs.existsSync(shield_assets_dir)){
+        // make assets directory
+        fs.mkdirSync(shield_assets_dir, (err) => {
+          if (err) {
+              log(err);
+              export_data.message = err;
+              mainWindow.webContents.send("export_result", export_data);
+              throw(err);
+          }
+        });
+      }
+      if (!fs.existsSync(game_asset_dir)){
+        // make directory for this game
+        fs.mkdirSync(game_asset_dir, (err) => {
+          if (err) {
+              log(err);
+              export_data.message = err;
+              mainWindow.webContents.send("export_result", export_data);
+              throw(err);
+          }
+        });
+      }
+      fs.copyFileSync(box_art_path, game_box_art);
+      export_data.games.push(application.DisplayName);
+    }
+
   }
 
   // assign successful export data and send to renderer
   export_data.code = 0;
   mainWindow.webContents.send("export_result", export_data);
   mainWindow.setProgressBar(-1);
+  validate_settings();
 });

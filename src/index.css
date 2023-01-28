@@ -111,7 +111,8 @@ div#app_fetch_output {
   overflow-y: auto;
 }
 
-input.settings {
+input.settings,
+select.settings {
   border-width: 1px;
   border-style: solid;
   height: 28px;
@@ -153,18 +154,17 @@ input.settings.invalid {
   border-color:#c53434;
 }
 
-input.settings.invalid.optional {
-  border-color:#e2ca5d;
-}
-
 input.settings.invalid:focus {
   outline: 2px solid #e92525;
+}
+
+input.settings.invalid.optional {
+  border-color:#e2ca5d;
 }
 
 input.settings.invalid.optional:focus {
   outline: 2px solid #e2ca5d;
 }
-
 
 input.settings#match_minimum,
 input.settings#thread_cnt,
@@ -177,6 +177,10 @@ input.settings#client_port {
 input.settings#client_ip {
   width: 120px;
   padding-left: 10px;
+}
+
+select.settings {
+  width: fit-content;
 }
 
 button {
@@ -201,7 +205,7 @@ button.get_path img {
   left: 0px;
 }
 
-button.go_to_dir {
+button.go_to {
   height: 32px;
   width: 32px;
   border-radius: 4px;
@@ -212,7 +216,7 @@ button.go_to_dir {
   background-color: transparent;
 }
 
-button.go_to_dir img {
+button.go_to img {
   height: 15px;
   width: 15px;
   filter: invert(var(--button-inversion));
@@ -220,8 +224,6 @@ button.go_to_dir img {
   top: 0px;
   left: 0px;
 }
-
-
 
 button.settings{
   height: 38px;

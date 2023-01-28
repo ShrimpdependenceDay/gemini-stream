@@ -28,6 +28,10 @@ function save_settings () {
         settings[$(this).attr('id')] = $(this).val()
     });
 
+    $('select.settings').each(function(){
+        settings[$(this).attr('id')] = $(this).val()
+    });
+
     settings['known_apps'] = {}
 
     $('table#known_apps tr').each(function(){
@@ -96,9 +100,24 @@ function close_results_page(){
     export_results_open = false;
 }
 
+function update_settings_visibility(){
+        $(".settings-input.host_dependent").hide();
+        if( $("#stream_host").val() == "Sunshine"){
+            $(".sunshine_setting").show();
+        }
+        else if( $("#stream_host").val() == "NVIDIA GameStream"){
+            $(".gamestream_setting").show();
+        }
+}
+
 function init_inputs() {
+    update_settings_visibility();
     $("input.settings").on('input', function(){
         save_settings();
+    });
+    $("select.settings").on('change', function(){
+        save_settings();
+        update_settings_visibility();
     });
 }
 
@@ -219,9 +238,15 @@ function init() {
       });
 
     // Add click handlers for go-to buttons
-    $("button.go_to_dir").on("click", function(){
+    $("button.go_to.dir").on("click", function(){
         // Get path of corresponding input
         var path = $(this).parent().find('input.settings').val();
+        window.api.open_dir(path);
+      });
+      $("button.go_to.file").on("click", function(){
+        // Get path of corresponding input's parent directory
+        var path = $(this).parent().find('input.settings').val().replace('\\', '/');
+        path = path.substr(0, path.lastIndexOf("/"))
         window.api.open_dir(path);
       });
 
@@ -268,7 +293,7 @@ window.api.receive("load_settings", (data) => {
 
     $(".host_name_display").text($("#host_name").val());
     $(".that_device_ip_address ").text($("#client_ip").val());
-
+    update_settings_visibility();
 });
 
 window.api.receive("fromMain", (data) => {
@@ -399,11 +424,6 @@ window.api.receive("sync_result", (result_data) => {
                     $("#results_content").append("<p class=\"results_game_entry\">&#x2022; " + result_data.synced_games[g] + "</p>");
                 }
                 $("#results_page").addClass("success");
-                if (!this_is_server){
-                    if (result_data.srm_loc_valid) {
-                        $("#open_srm").show();
-                    }
-                }
             }
             else {
                 $("#results_page").addClass("failure");
@@ -459,6 +479,7 @@ window.api.receive("open_settings_page", (data) => {
 
 window.api.receive("settings_validities", (data) => {
     console.log(`Received "settings_validities" from main process`);
+    console.log(data);
 
     for (let setting in data) {
         var $input_element = $('input#' + setting);

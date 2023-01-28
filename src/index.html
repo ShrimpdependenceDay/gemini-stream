@@ -128,7 +128,7 @@
 
       <div id="results_footer">
         <button id="export_sync_to_client" onclick="sync_to_client()" style="display:none">Sync</button>
-        <button id="open_srm" onclick="open_srm()">Open Steam ROM Manager</button>
+        <button id="open_srm" style="display:none" onclick="open_srm()">Open Steam ROM Manager</button>
       </div>
     </div>
     <div id="results-dialog-blanket" style="display:none;" onclick="close_results_page()"> </div>
@@ -144,13 +144,29 @@
         <div class="settings-input"><p class="settings-label">Client IP Address</p><input type="text" class="settings" id="client_ip" name="client_ip" onkeypress="return isNumberKey(this, event);"></div>
         <div class="settings-input"><p class="settings-label">Port</p><input type="number" class="settings" id="server_port" name="server_port" min="0" max="65535"></div>
         <div class="settings-input">
+          <p class="settings-label">Stream host</p>
+          <select name="stream_host" id="stream_host" class="settings">
+            <option value="Sunshine">Sunshine</option>
+            <option value="NVIDIA GameStream">NVIDIA GameStream</option>
+          </select>
+        </div>
+        <div class="settings-input host_dependent gamestream_setting">
           <p class="settings-label">Shield Apps path</p>
           <div class="settings_path_container">
             <input class="settings path" type="text" id="shield_apps_dir" name="shield_apps_dir">
             <button class="get_path folder"><img src="icons/folder.png"/></button>
-            <button class="go_to_dir"><img src="icons/go-to.png"/></button>
+            <button class="go_to dir"><img src="icons/go-to.png"/></button>
           </div>
         </div>
+        <div class="settings-input host_dependent sunshine_setting">
+          <p class="settings-label">Sunshine Apps path</p>
+          <div class="settings_path_container">
+            <input class="settings path" type="text" id="sunshine_apps" alt="Hover text" name="sunshine_apps" title="Path to Sunshine apps.json">
+            <button class="get_path file"><img src="icons/file.png"/></button>
+            <button class="go_to file"><img src="icons/go-to.png"/></button>
+          </div>
+        </div>
+
 
         <div class="settings-input" id="known_apps_div"><p class="settings-label">Known applications</p>
           <table id="known_apps">
@@ -167,7 +183,7 @@
       <div id="settings_content" class="client">
         <div class="settings-input"><p class="settings-label">Port</p><input type="number" class="settings" id="client_port" name="client_port" min="0" max="65535"></div>
 
-        <div class="settings-input">
+        <div class="settings-input" style="display:none">
           <p class="settings-label">Steam ROM Manager Location</p>
           <div class="settings_path_container">
             <input class="settings path optional" type="text" id="srm_location" alt="Hover text" name="srm_location" title="Path to Steam ROM Manager">
@@ -180,7 +196,6 @@
 
       <div id="settings_footer">
         <button id="reset-settings" onclick="reset_settings()">Reset</button>
-
       </div>
     </div>
     <div id="settings-dialog-blanket" style="display:none;" onclick="close_settings_page()"> </div>
