@@ -241,13 +241,13 @@ function init() {
     $("button.go_to.dir").on("click", function(){
         // Get path of corresponding input
         var path = $(this).parent().find('input.settings').val();
-        window.api.open_dir(path);
+        window.api.send("open_dir", path);
       });
       $("button.go_to.file").on("click", function(){
         // Get path of corresponding input's parent directory
-        var path = $(this).parent().find('input.settings').val().replace('\\', '/');
-        path = path.substr(0, path.lastIndexOf("/"))
-        window.api.open_dir(path);
+        var path = $(this).parent().find('input.settings').val();
+        console.log(path);
+        window.api.send("open_file", path);
       });
 
       $('#app_list_table').hide();

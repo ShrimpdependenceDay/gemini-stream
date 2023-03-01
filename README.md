@@ -18,7 +18,7 @@ Gemini Stream uses a number of open source projects to work properly:
 Gemini Stream requires the support of the following software for the full streaming experience:
 - [Moonlight] - Streaming client (tested with version 4.3.1)
 - [Sunshine] - Streaming host (tested with v0.18.1)
-- [Steam ROM Manager] - Fetch game artwork and add games to Steam
+- [Steam ROM Manager] - Fetch game artwork and add games to Steam (tested with version 2.3.40)
 
 ## Installation
 
@@ -50,16 +50,17 @@ Both the server and client applications have some settings that need to be confi
 | Port | Port to use for in-network communication with host device |
 | Moonlight host name | Name of the streaming host, as it appears in Moonlight.<br/> **NOTE:** This can sometimes be a truncated version of the actual host's name, so be sure and check that what is configured matches up with what is shown in Moonlight. |
 | Moonlight options | List of options to be appended to the command to start streaming via Moonlight.<br/>For full set of options, run **Moonlight.exe stream -h** from the Moonlight installation directory |
+| Steam ROM Manager configurations | Path to Steam ROM Manager userConfigurations.json file which contains parser configuration info |
 
 ## Usage
 1. Open Gemini Stream on both host and client
-2. Configure settings for host and client. Default settings will work for many options, but IP address at a minimum will need to be initialized.
+2. Configure settings for host and client. Default settings will work for many options, but IP address and host name at a minimum will need to be initialized.
     - If configured correctly and devices can communicate over the local network, the client device should show "Connected" under the host device information
 3. On host, select "Fetch installed apps" (or "Load installed apps" if you just want to load the previously fetched list of applications)
 4. Once the list of installed applications is visibile, select the desired applications you want to make streamable, and select "Export selected apps"
-    - After the export is complete, you may need to restart Sunshine on the host machine and Moonlight on the client machine in order for Moonlight to detect the newly exported games.
+    > Note for Sunshine: After the export is complete, you may need to restart Sunshine on the host machine and Moonlight on the client machine in order for Moonlight to detect the newly exported games.
 5. If the host and client devices are connected, a blue "Sync" button should appear when streamable applications are available. Select it to send data on the streamable applications over to the client
-6. On the client, close Steam if it is running, and open Steam ROM Manager. Verify that there is a Gemini Stream configuration.
+6. On the client, close Steam if it is running, and open Steam ROM Manager. Verify that there is a Gemini Stream parser configuration.
 7. Within Steam ROM Manager, select the Preview tab, then Generate app list.
 8. Provided the applications previously synchronized show up in the app list preview, select "Save app list" to add your streamable games to Steam and complete the process
 

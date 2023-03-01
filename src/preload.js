@@ -27,7 +27,8 @@ contextBridge.exposeInMainWorld(
                 "start_host",
                 "sync_to_client",
                 "start_srm",
-                "open_dir"
+                "open_dir",
+                "open_file"
             ];
             if (validChannels.includes(channel)) {
                 ipcRenderer.send(channel, data);

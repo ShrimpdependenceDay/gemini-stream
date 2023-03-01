@@ -29,13 +29,13 @@ const DEV_MENU_STRING = "Dev";
 var server;
 var stream_client_ready = false;
 var socket_clients = [];
-var steam_rm_cnfg_path = path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json');
 const OPEN_MANIFESTS_STRING = "Open manifests directory";
 
 // Stream server variables
 var socket;
 var cpu_count = os.cpus().length;
 var app_data = process.env.LOCALAPPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
+app_data = app_data.replaceAll('\\', '/')
 var app_list_path = path.resolve(usr_data_path, 'app_list.json');
 var games_dir = path.resolve(usr_data_path, 'games');
 var manifests_dir_path = path.resolve(usr_data_path, 'srm_manifests');
@@ -51,7 +51,7 @@ var valid_hosts = [ GAMESTREAM_HOST, SUNSHINE_HOST ];
 
 // Default settings
 var default_settings = {
-  shield_apps_dir: path.join(app_data, 'NVIDIA Corporation', 'Shield Apps'),
+  shield_apps_dir: path.join(app_data, 'NVIDIA Corporation', 'Shield Apps').replaceAll('\\', '/'),
   sunshine_apps: "C:/Program Files/Sunshine/config/apps.json",
   known_apps: {
     'Microsoft.SeaofThieves': 'Sea of Thieves',
@@ -66,7 +66,8 @@ var default_settings = {
   server_port: 5056,
   client_port: 5056,
   srm_location: "/home/deck/.local/share/applications/SRM.desktop",
-  stream_host: SUNSHINE_HOST
+  stream_host: SUNSHINE_HOST,
+  srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json')
 }
 
 // Current settings
@@ -80,7 +81,8 @@ var current_settings = {
   server_port: 0,
   client_port: 0,
   srm_location: "",
-  stream_host: ""
+  stream_host: "",
+  srm_configs: ''
 }
 
 // Settings validities
@@ -483,7 +485,7 @@ function fetch_installed_apps(){
       var skip_item = false;
 
       // Split all data up by lines
-      all_data = all_data.replace(rep_re, " ");
+      all_data = all_data.replaceAll(rep_re, " ");
       all_data = all_data.split("\r\n");
 
       for (const line of all_data) {
@@ -572,7 +574,7 @@ function fetch_installed_apps(){
           // Sort app list by display name, then dump the list
           // to app_list.json
           app_list.sort((a, b) => (a.DisplayName > b.DisplayName ? 1 : -1))
-          fs.writeFile(app_list_path, JSON.stringify(app_list), (err) => {
+          fs.writeFile(app_list_path, JSON.stringify(app_list, null, 4), (err) => {
             if (err) {
               fetch_data.message = err;
               log(err);
@@ -689,7 +691,7 @@ function update_connection(){
         id: "GEMINI_CONNECTION_DATA",
         device_name: os.hostname()
       }
-      var conn_data_str = JSON.stringify(conn_data);
+      var conn_data_str = JSON.stringify(conn_data, null, 4);
       sock.write(conn_data_str);
 
 
@@ -745,10 +747,10 @@ function update_connection(){
           }// end for
 
           log("Manifest data:");
-          log(JSON.stringify(manifest_data));
+          log(JSON.stringify(manifest_data, null, 4));
 
           // Write manifest data to file
-          fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data), (err) => {
+          fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data, null, 4), (err) => {
             if (err) {
               log(err);
               sync_data.success = false;
@@ -770,7 +772,7 @@ function update_connection(){
           mainWindow.webContents.send("sync_result", sync_data);
 
           // Send sync result back to server
-          var sync_data_str = JSON.stringify(sync_data);
+          var sync_data_str = JSON.stringify(sync_data, null, 4);
           sock.write(sync_data_str);
         }
       });
@@ -878,7 +880,7 @@ function validate_settings (settings) {
     setting_validities[setting] = false;
 
     // assert reminder for new config items
-    assert.equal(10, Object.keys(default_settings).length);
+    assert.equal(11, Object.keys(default_settings).length);
     switch(setting) {
       // Shield Apps directory - must exist
       case 'shield_apps_dir':
@@ -933,6 +935,11 @@ function validate_settings (settings) {
         setting_validities[setting] = valid_hosts.includes(settings[setting]);
         break;
 
+      // Steam Rom Manager configurations location - must exist
+      case 'srm_configs':
+        setting_validities[setting] = (fs.existsSync(settings[setting]));
+        break;
+
       default:
         log('Did not validate ' + setting);
         break;
@@ -948,6 +955,45 @@ function show_about(){
     // detail: `Created by ${pkg.author.name}`
     // icon: path.join(__dirname, '..', 'static/Icon.png'),
    });
+}
+
+function save_settings(args){
+  log(JSON.stringify(args, null, 4));
+  for (let setting in args) {
+    // Save the current provided setting to the
+    // config file, then store it in our current settings
+    store.set(setting, args[setting]);
+
+    // If this is a connection related setting and it
+    // has changed, destroy connection so it will reconnect
+    // on the next cycle
+    if ( (setting == "server_port" || setting == "client_port" || setting == "client_ip") && args[setting] != current_settings[setting] ){
+      if (this_is_server){
+        log("Connection setting changed");
+        socket.destroy();
+      }
+      else {
+        close_socket_server();
+      }
+    }
+
+    // If this is the SRM config location setting and it
+    // has changed, call the function to add our parser
+    if ( setting == "srm_configs" && args[setting] != current_settings[setting] ){
+      if (!this_is_server){
+        log("Steam ROM Manager config location changed - adding Gemini Stream parser");
+        current_settings[setting] = args[setting]
+        sync_srm_cnfg();
+      }
+    }
+
+    current_settings[setting] = args[setting]
+  }
+
+  // Validate the new settings
+  validate_settings(current_settings);
+
+  log('Saved settings');
 }
 
 function sync_srm_cnfg() {
@@ -1024,14 +1070,14 @@ function sync_srm_cnfg() {
   }
 
   // If the SRM user config file doesn't exist yet, create it
-  if(!fs.existsSync(steam_rm_cnfg_path)){
+  if(!fs.existsSync(current_settings.srm_configs)){
     fs.mkdirSync(path.resolve(os.homedir(), '.config/steam-rom-manager/userData'), options={recursive: true});
     var srm_usr_cnfg = [];
   }
   else{
     // Open SRM user configs, try to find the Gemini Stream config,
     // and replace it with our template
-    var srm_usr_cnfg = JSON.parse(fs.readFileSync(steam_rm_cnfg_path));
+    var srm_usr_cnfg = JSON.parse(fs.readFileSync(current_settings.srm_configs));
 
     var existing_cnfg = srm_usr_cnfg.find(cnfg => cnfg.configTitle === "Gemini Stream");
     if (existing_cnfg){
@@ -1042,13 +1088,13 @@ function sync_srm_cnfg() {
 
   // Add our template, update file
   srm_usr_cnfg.unshift(template);
-  fs.writeFile(steam_rm_cnfg_path, JSON.stringify(srm_usr_cnfg), (err) => {
+  fs.writeFile(current_settings.srm_configs, JSON.stringify(srm_usr_cnfg, null, 4), (err) => {
     if (err) {
       log(err);
       throw(err);
     }
     log("Added Gemini Stream configuration to Steam ROM Manager");
-    log(steam_rm_cnfg_path);
+    log(current_settings.srm_configs);
   });
 }
 
@@ -1072,21 +1118,9 @@ ipcMain.on("request_load_app_list", (event, args) => {
 ipcMain.on("reset_settings", (event, args) => {
   log('Received "reset_settings" command');
 
-  // Iterate over all settings and restore them to their default
-  for (let setting in default_settings) {
-    current_settings[setting] = default_settings[setting];
-
-    // Write "new" settings to config file
-    store.set(setting, default_settings[setting]);
-  }
-
-  if (this_is_server){
-    log("Connection setting changed");
-    socket.destroy();
-  }
+  save_settings(default_settings);
 
   // Have renderer reload default settings
-  validate_settings(current_settings);
   mainWindow.webContents.send("load_settings", current_settings);
 });
 
@@ -1094,11 +1128,19 @@ ipcMain.on("reset_settings", (event, args) => {
 // Open directory
 ipcMain.on("open_dir", (event, dir) => {
   log('Received "open_dir" command');
+  log("Opening " + dir.replaceAll('/', '\\'));
+  shell.openPath(dir.replaceAll('/', '\\'))
+});
 
-  if (dir == "games") {
-    // spawn("dolphin /home/deck/.config/gemini-stream");
-    spawn("dolphin", args=["/home/deck/.config/gemini-stream/games"]);
+
+// Open file
+ipcMain.on("open_file", (event, target_file) => {
+  log('Received "open_file" command');
+  log("Opening " + target_file);
+  if( this_is_server ){
+    target_file = target_file.replaceAll('/', '\\');
   }
+  shell.showItemInFolder(target_file)
 });
 
 
@@ -1230,7 +1272,7 @@ ipcMain.on("sync_to_client", (event, args) => {
       games: tx_games
     }
 
-    var tx_data_str = JSON.stringify(tx_data);
+    var tx_data_str = JSON.stringify(tx_data, null, 4);
 
     log('Games to transmit: ' + tx_games);
     socket.write(tx_data_str);
@@ -1256,32 +1298,7 @@ ipcMain.on("save_settings", (event, args) => {
   // single time the user presses a key
   clearTimeout(save_settings_timeout);
   save_settings_timeout = setTimeout(() => {
-    log(args);
-    for (let setting in args) {
-      // Save the current provided setting to the
-      // config file, then store it in our current settings
-      store.set(setting, args[setting]);
-
-      // If this is a connection related setting and it
-      // has changed, destroy connection so it will reconnect
-      // on the next cycle
-      if ( (setting == "server_port" || setting == "client_port" || setting == "client_ip") && args[setting] != current_settings[setting] ){
-        if (this_is_server){
-          log("Connection setting changed");
-          socket.destroy();
-        }
-        else {
-          close_socket_server();
-        }
-      }
-
-      current_settings[setting] = args[setting]
-    }
-
-    // Validate the new settings
-    validate_settings(current_settings);
-
-    log('Saved settings');
+    save_settings(args);
   }, 1000);
 
 });
@@ -1338,7 +1355,7 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
     // Remove invalid characters from game name
     const invalid = '<>:"/\|?*™'
     for (var char of invalid){
-      application.DisplayName = application.DisplayName.replace(char, '')
+      application.DisplayName = application.DisplayName.replaceAll(char, '')
     }
 
     // Sunshine export
