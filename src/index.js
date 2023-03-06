@@ -133,6 +133,18 @@ process.on('uncaughtException', function (error) {
   }
 });
 
+const dev_menu_item =   {
+  label: 'Development',
+  submenu: [
+    {
+      label: 'Run dev function',
+      click: () => {
+        dev_function();
+      }
+    }
+  ]
+};
+
 // Toolbar configuration
 const toolbar_template = [
   {
@@ -177,6 +189,11 @@ const toolbar_template = [
     ]
   }
 ]
+
+if( dev_env ){
+  toolbar_template.push(dev_menu_item);
+}
+
 const menu = Menu.buildFromTemplate(toolbar_template);
 var manifests_item = menu.items[0].submenu.items.find(item => item.label === OPEN_MANIFESTS_STRING)
 manifests_item.visible = false;
@@ -348,6 +365,10 @@ function create_debug_log(){
     log_open = false;
   });
 
+}
+
+function dev_function(){
+  log('Running dev function');
 }
 
 function log(message) {
