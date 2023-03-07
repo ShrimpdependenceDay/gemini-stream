@@ -181,7 +181,7 @@ function GeminiStreamExport()
     # attempt to synchronize with the client device
     if( $sync_req.games.length -gt 0 )
     {
-        $games_joined = $sync_req.games -join "`r`n" | Out-String
+        $games_joined = $sync_req.games -join "`r`n`t" | Out-String
 
         # $gs_config.server_port = "5056"
         $connected = $false
@@ -201,20 +201,25 @@ function GeminiStreamExport()
         }
         catch [System.Management.Automation.MethodInvocationException]{
             $__logger.Info($_)
-            $PlayniteApi.Dialogs.ShowErrorMessage("Failed to connect to "+$gs_config.client_ip+":"+$gs_config.server_port)
+            $dialog_result = $PlayniteApi.Dialogs.ShowMessage(
+                "The following applications are ready to be imported:`r`n`t"+$games_joined+"`r`n`r`nApplication List:`r`n"+$gs_config.sunshine_apps+"`r`n`r`nOpen directory now?",
+                "Export Complete",
+                "YesNo"
+            )
+            $__logger.Info($dialog_result)
         }
 
         # If we connected successfully, send the sync request
         # to the client, then close the connection.
         if ($connected -and $tcpConnection.Connected)
         {
-            $__logger.Info("Syncing the following games:`r`n"+$games_joined)
+            $__logger.Info("Syncing the following games:`r`n`t"+$games_joined)
             $sync_json = $sync_req | ConvertTo-Json -depth 32
             $writer.WriteLine($sync_json) | Out-Null
             $reader.Close()
             $writer.Close()
             $tcpConnection.Close()
-            $PlayniteApi.Dialogs.ShowMessage("Synchronized the following applications:`r`n"+$games_joined)
+            $PlayniteApi.Dialogs.ShowMessage("Synchronized the following applications:`r`n`t"+$games_joined)
         }
     }
 }

@@ -10,6 +10,7 @@ const assert = require('assert');
 const ip = require('ip');
 const { data } = require('jquery');
 const { shell } = require('electron');
+const { stringify } = require('querystring');
 
 log(ip.address()); // my ip address
 log(os.hostname());
@@ -30,6 +31,7 @@ var server;
 var stream_client_ready = false;
 var socket_clients = [];
 const OPEN_MANIFESTS_STRING = "Open manifests directory";
+const IMPORT_APP_LIST_STRING = "Import application list";
 
 // Stream server variables
 var socket;
@@ -163,6 +165,12 @@ const toolbar_template = [
         }
       },
       {
+        label: IMPORT_APP_LIST_STRING,
+        click: () => {
+          import_app_list();
+        }
+      },
+      {
         label: OPEN_MANIFESTS_STRING,
         click: () => {
           spawn("dolphin", args=[manifests_dir_path]);
@@ -196,7 +204,9 @@ if( dev_env ){
 
 const menu = Menu.buildFromTemplate(toolbar_template);
 var manifests_item = menu.items[0].submenu.items.find(item => item.label === OPEN_MANIFESTS_STRING)
+var import_app_list_item = menu.items[0].submenu.items.find(item => item.label === IMPORT_APP_LIST_STRING)
 manifests_item.visible = false;
+import_app_list_item.visible = false;
 Menu.setApplicationMenu(menu);
 
 // Keep a global reference of the window object, if you don't, the window will
@@ -720,77 +730,11 @@ function update_connection(){
         var data_str = data.toString();
         log(`${sock.remoteAddress}: ${data_str}`);
         if (data_str.includes("GEMINI_SYNC_REQUEST")){
-          // Build initial sync data. This will be sent both
-          // to the client's (this device's) renderer and
-          // sent back to the server's renderer for display
-          sync_data = {
-            id: "GEMINI_SYNC_STATUS",
-            success: true,
-            message: "Success!",
-            synced_games: [],
-            srm_loc_valid: false
-          }
-
           // Get JSON from socket message
           rx_data = JSON.parse(data_str);
           mainWindow.webContents.send("sync_start");
 
-          // If the manifests directory doesn't exist, create it
-          if (!fs.existsSync(manifests_dir_path)){
-            fs.mkdir(manifests_dir_path, (err) => {
-              if (err) {
-                  console.error(err);
-                  sync_data.success = false;
-                  sync_data.message = "Failed to create manifests directory";
-                  mainWindow.webContents.send("sync_result", sync_data);
-                  return;
-              }
-              log('Manifests directory created successfully');
-              add_manifests_menu_item();
-              return;
-            });
-          }
-
-          var manifest_data = [];
-
-          // for each game in the received data
-          for(var g in rx_data.games){
-            // create game definition
-            var game_def = {
-              title: rx_data.games[g],
-              target: "/usr/bin/flatpak",
-              startIn: "/usr/bin/",
-              launchOptions: "run --branch=stable --arch=x86_64 --command=moonlight com.moonlight_stream.Moonlight stream " + current_settings.moonlight_options + " " + current_settings.host_name + ` "${rx_data.games[g]}"`
-            }
-
-            // Add game definition to manifest data
-            manifest_data.push(game_def);
-          }// end for
-
-          log("Manifest data:");
-          log(JSON.stringify(manifest_data, null, 4));
-
-          // Write manifest data to file
-          fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data, null, 4), (err) => {
-            if (err) {
-              log(err);
-              sync_data.success = false;
-              sync_data.message = "Failed to write manifests data";
-              mainWindow.webContents.send("sync_result", sync_data);
-              return;
-            }
-            log("Added synchronized games list to " + srm_manifest_path);
-          });
-
-          // If sync was successful, populate sync data indicating that fact
-          if (sync_data.success) {
-            sync_data.message = "Successfully synchronized the following applications:";
-            sync_data.synced_games = rx_data.games;
-            sync_data.srm_loc_valid = setting_validities['srm_location'];
-          }
-
-          // send sync result to renderer
-          mainWindow.webContents.send("sync_result", sync_data);
+          sync_to_manifest(rx_data);
 
           // Send sync result back to server
           var sync_data_str = JSON.stringify(sync_data, null, 4);
@@ -840,6 +784,62 @@ function init_socket_client(){
       mainWindow.webContents.send("sync_result", sync_data);
     }
   });
+}
+
+
+const import_app_list = async () => {
+  // Open file dialog
+  const dialog_ret = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select applications list to load',
+    filters: [
+      { name: 'json', extensions: ['json'] }
+    ],
+    properties: [ 'openFile' ]
+  });
+
+  if (dialog_ret.canceled){
+    return;
+  }
+
+  // load JSON from file
+  log("Importing from " + dialog_ret.filePaths[0]);
+  try {
+    var import_app_list_json = JSON.parse(fs.readFileSync(dialog_ret.filePaths[0]));
+  } catch (error) {
+      show_import_format_error();
+      return;
+  }
+
+  // Create empty rx_data
+  var rx_data = {
+    id: "GEMINI_SYNC_REQUEST",
+    games: []
+  }
+  log("import_app_list_json:");
+  log(JSON.stringify(import_app_list_json, null, 4));
+  log(import_app_list_json['apps'][0]);
+
+  // Validate app list file
+  if( !( 'apps' in import_app_list_json ) ){
+    show_import_format_error();
+    return;
+  }
+
+  // Iterate over apps array, populating rx_data with apps[index].name and application settings for moonlight options
+  for( var i in import_app_list_json['apps'] ){
+    var app = import_app_list_json['apps'][i];
+    if( !( 'name' in app ) ){
+      show_import_format_error();
+      return;
+    }
+
+    rx_data.games.push(app.name);
+  }
+
+  // Sync the data from the app list to our manifest file
+  log("rx_data:");
+  log(JSON.stringify(rx_data, null, 4));
+  sync_to_manifest(rx_data);
 }
 
 
@@ -976,6 +976,23 @@ function show_about(){
     // detail: `Created by ${pkg.author.name}`
     // icon: path.join(__dirname, '..', 'static/Icon.png'),
    });
+}
+
+function show_import_format_error(){
+  const messageBoxOptions = {
+    type: "error",
+    title: "Error",
+    message: "Invalid application list format\n\nApplication list should be " +
+             "a JSON file containing apps[ ], with each app having a name property" +
+             "\n\nExample:\n\n" +
+             "{\n" +
+             "\"apps\": [\n" +
+             "            { \"name\":  \"Game Name 1\" },\n" +
+             "            { \"name\":  \"Game Name 2\" }\n" +
+             "          ]\n" +
+             "}"
+  };
+  dialog.showMessageBoxSync(messageBoxOptions);
 }
 
 function save_settings(args){
@@ -1120,6 +1137,81 @@ function sync_srm_cnfg() {
 }
 
 
+function sync_to_manifest(rx_data) {
+    // Build initial sync data. This will be sent
+    // to the client's (this device's) renderer in this
+    // function, as well as back to the host if sync
+    // was done using TCP connection via a parent function
+    sync_data = {
+      id: "GEMINI_SYNC_STATUS",
+      success: true,
+      message: "Success!",
+      synced_games: [],
+      srm_loc_valid: false
+    }
+
+  // If the manifests directory doesn't exist, create it
+  if (!fs.existsSync(manifests_dir_path)){
+    fs.mkdir(manifests_dir_path, (err) => {
+      if (err) {
+          console.error(err);
+          sync_data.success = false;
+          sync_data.message = "Failed to create manifests directory";
+          mainWindow.webContents.send("sync_result", sync_data);
+          return sync_data;
+      }
+      log('Manifests directory created successfully');
+      add_manifests_menu_item();
+    });
+  }
+
+  var manifest_data = [];
+
+  // for each game in the received data
+  for(var g in rx_data.games){
+    // create game definition
+    var game_def = {
+      title: rx_data.games[g],
+      target: "/usr/bin/flatpak",
+      startIn: "/usr/bin/",
+      launchOptions: "run --branch=stable --arch=x86_64 --command=moonlight com.moonlight_stream.Moonlight stream " + current_settings.moonlight_options + " " + current_settings.host_name + ` "${rx_data.games[g]}"`
+    }
+
+    // Add game definition to manifest data
+    manifest_data.push(game_def);
+  }// end for
+
+  log("Manifest data:");
+  log(JSON.stringify(manifest_data, null, 4));
+
+  // Write manifest data to file
+  fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data, null, 4), (err) => {
+    if (err) {
+      log(err);
+      sync_data.success = false;
+      sync_data.message = "Failed to write manifests data";
+      mainWindow.webContents.send("sync_result", sync_data);
+      return sync_data;
+    }
+    log("Added synchronized games list to " + srm_manifest_path);
+  });
+
+  // If sync was successful, populate sync data indicating that fact
+  if (sync_data.success) {
+    sync_data.message = "Successfully synchronized the following applications:";
+    sync_data.synced_games = rx_data.games;
+    sync_data.srm_loc_valid = setting_validities['srm_location'];
+  }
+
+  // send sync result to renderer
+  mainWindow.webContents.send("sync_result", sync_data);
+
+  // return the sync result so the caller can do what
+  // it needs
+  return sync_data;
+}
+
+
 /******************************************************************
 *                     IPC HANDLING                                *
 ******************************************************************/
@@ -1233,6 +1325,9 @@ ipcMain.on("main_init", (event, data) => {
     log('Client stuff');
     sync_srm_cnfg();
     add_manifests_menu_item();
+
+    var import_app_list_item = menu.items[0].submenu.items.find(item => item.label === IMPORT_APP_LIST_STRING)
+    import_app_list_item.visible = true;
   }
 });
 
@@ -1339,7 +1434,7 @@ ipcMain.on("fetch_apps", (event, args) => {
 // input_id is needed so, when a response is sent, we know
 // which input to populate.
 ipcMain.on("get_path", (event, args) => {
-  log('Received "get_directory" from renderer ' + args.input_id);
+  log('Received "get_path" from renderer ' + args.input_id);
 
   // Get path from user. Call external function because it must be async
   get_user_path(args.input_id, args.is_file);
