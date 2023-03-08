@@ -71,13 +71,14 @@ function AddGameToSunshineApps([Playnite.SDK.Models.Game]$game, [String]$apps_pa
         $__logger.Info($game.name+" not in list of sunshine apps")
         $command = $PlayniteApi.Paths.ApplicationPath+"\Playnite.DesktopApp.exe --start "+$game.id
         $my_sunshine_app = New-Object -TypeName SunshineApp -ArgumentList $game.name, $command
-        $my_sunshine_app | Add-Member -NotePropertyName 'image-path' -NotePropertyValue "" # (this is done this way because of the '-' in image-path)
         [System.Collections.ArrayList]$sunshine_app_list = $sunshine_apps.apps
         $sunshine_app_list.Add($my_sunshine_app)
         $sunshine_apps.apps = $sunshine_app_list
 
         # Write the updated Sunshine apps .json
-        $sunshine_apps | ConvertTo-Json -depth 32| set-content $apps_path
+        $sunshine_apps_str = $sunshine_apps | ConvertTo-Json -depth 32
+        $sunshine_apps_str = $sunshine_apps_str.replace('image_path', 'image-path')
+        $sunshine_apps_str | set-content $apps_path
     }
     else{
         $__logger.Info($game.name+" found in list of sunshine apps")
@@ -108,6 +109,7 @@ function GeminiStreamExport()
         [String]$name
         [String]$output = ""
         [String]$cmd = ""
+        [String]$image_path = ""
         [System.Collections.ArrayList]$detached = @()
 
         SunshineApp () {}
@@ -183,7 +185,6 @@ function GeminiStreamExport()
     {
         $games_joined = $sync_req.games -join "`r`n`t" | Out-String
 
-        # $gs_config.server_port = "5056"
         $connected = $false
 
         # Try to connect to the client device. If an exception is
@@ -206,7 +207,10 @@ function GeminiStreamExport()
                 "Export Complete",
                 "YesNo"
             )
-            $__logger.Info($dialog_result)
+            if( $dialog_result -eq "Yes" )
+            {
+
+            }
         }
 
         # If we connected successfully, send the sync request

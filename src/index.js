@@ -1,5 +1,5 @@
 // Includes
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, screen } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const { spawn, spawnSync } = require('child_process');
@@ -12,9 +12,6 @@ const { data } = require('jquery');
 const { shell } = require('electron');
 const { stringify } = require('querystring');
 
-log(ip.address()); // my ip address
-log(os.hostname());
-
 // Shared variables
 var this_is_server;
 var connected = false;
@@ -24,6 +21,7 @@ var usr_data_path = app.getPath('userData');
 var save_settings_timeout = null;
 var already_crashing;
 var dev_env = !__dirname.includes("app.asar");
+var debug_log = []
 const DEV_MENU_STRING = "Dev";
 
 // Stream client variables
@@ -50,6 +48,7 @@ var current_apps = 0;
 const GAMESTREAM_HOST = "NVIDIA GameStream";
 const SUNSHINE_HOST = "Sunshine";
 var valid_hosts = [ GAMESTREAM_HOST, SUNSHINE_HOST ];
+var qres_path = path.resolve(usr_data_path, 'QRes.exe');
 
 // Default settings
 var default_settings = {
@@ -69,7 +68,12 @@ var default_settings = {
   client_port: 5056,
   srm_location: "/home/deck/.local/share/applications/SRM.desktop",
   stream_host: SUNSHINE_HOST,
-  srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json')
+  srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json'),
+  res_switching_enbl: false,
+  res_pre_x: 800,
+  res_pre_y: 600,
+  res_post_x: 0,
+  res_post_y: 0
 }
 
 // Current settings
@@ -84,11 +88,31 @@ var current_settings = {
   client_port: 0,
   srm_location: "",
   stream_host: "",
-  srm_configs: ''
+  srm_configs: '',
+  res_switching_enbl: false,
+  res_pre_x: 0,
+  res_pre_y: 0,
+  res_post_x: 0,
+  res_post_y: 0
 }
 
 // Settings validities
 var setting_validities = {};
+
+log(ip.address()); // my ip address
+log(os.hostname());
+log('App path: '+app.getAppPath());
+log(qres_path);
+
+app.whenReady().then(() => {
+  // We cannot require the screen module until the app is ready.
+  const { screen } = require('electron')
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  default_settings.res_post_x = primaryDisplay.size.width;
+  default_settings.res_post_y = primaryDisplay.size.height;
+  log('Set default screen resolution to ' + default_settings.res_post_x + 'x' + default_settings.res_post_y)
+})
 
 // Error handling
 process.on('uncaughtException', function (error) {
@@ -105,12 +129,12 @@ process.on('uncaughtException', function (error) {
   if (error.code == 'ECONNREFUSED' ||
       error.code == 'EACCES' ||
       error.code == 'EINVAL' ||
+      error.code == 'EAI_AGAIN' ||
       error.code == 'ECONNRESET' ||
       error.code == 'ECONNABORTED' ||
       error.code == 'ENETUNREACH' ||
       error.code == 'ELIFECYCLE' ||
       error.code == 'ENOTFOUND' ) {
-    log('Client not available - ' + error.code);
     connected = false;
   }
   else if ( error.code == 'ERR_SOCKET_BAD_PORT'){
@@ -375,22 +399,47 @@ function create_debug_log(){
     log_open = false;
   });
 
+  setTimeout(() => {
+    // Fill in the log with all the prior messages
+    for( var i in debug_log ){
+      console.log('Sent message: ' + debug_log[i])
+      debugWindow.webContents.send("message", debug_log[i]);
+    }
+  }, 500);
+
 }
 
 function dev_function(){
   log('Running dev function');
+  var qres_path = path.resolve(__dirname, "QRes.exe");
+  var child_proc = spawn(qres_path, args=["/X:1920", "/Y:1080"]);
+  setTimeout(() => {
+    var child_proc = spawn(qres_path, args=["/X:2560", "/Y:1440"]);
+  }, 5000);
+
 }
 
 function log(message) {
   try {
+    // Create a string using the current date/time + the given message,
+    // and add it to our debug log list of strings
     console.log(message);
+    var d = new Date();
+    var dt_string = '[' + d.toLocaleString() + '] '
+    var full_message = dt_string + message
+    debug_log.push(full_message)
+
+    // If the debug log list of strings exceeds maximum, remove the first
+    if( debug_log.length > 1000 ){
+      debug_log.shift();
+    }
+
+    // If the log isn't open, return early. Otherwise, send our message
+    // to the debug window
     if (!log_open || !debugWindow){
       return;
     }
-    var d = new Date();
-
-    var dt_string = '[' + d.toLocaleString() + '] '
-    debugWindow.webContents.send("message", dt_string + message);
+    debugWindow.webContents.send("message", full_message);
   } catch (error) {
 
   }
@@ -649,7 +698,12 @@ function update_connection(){
 
     // Get list of games in Sunshine apps
     if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
-      var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      try {
+        var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      } catch (error) {
+          log('Interrupting file write');
+          return;
+      }
       game_count = sunshine_json.apps.length;
     }
 
@@ -817,7 +871,6 @@ const import_app_list = async () => {
   }
   log("import_app_list_json:");
   log(JSON.stringify(import_app_list_json, null, 4));
-  log(import_app_list_json['apps'][0]);
 
   // Validate app list file
   if( !( 'apps' in import_app_list_json ) ){
@@ -901,7 +954,7 @@ function validate_settings (settings) {
     setting_validities[setting] = false;
 
     // assert reminder for new config items
-    assert.equal(11, Object.keys(default_settings).length);
+    assert.equal(16, Object.keys(default_settings).length);
     switch(setting) {
       // Shield Apps directory - must exist
       case 'shield_apps_dir':
@@ -963,6 +1016,7 @@ function validate_settings (settings) {
 
       default:
         log('Did not validate ' + setting);
+        setting_validities[setting] = true;
         break;
     }
   }
@@ -1025,7 +1079,80 @@ function save_settings(args){
       }
     }
 
-    current_settings[setting] = args[setting]
+    // If the resolution switching setting has changed, try
+    // to go and update our sunshine apps list appropriately
+    if ( ( setting == "res_switching_enbl"
+        || setting == "res_pre_x"
+        || setting == "res_pre_y"
+        || setting == "res_post_x"
+        || setting == "res_post_y" )
+      && args[setting] != current_settings[setting] ){
+      if (!this_is_server){
+        return;
+      }
+      current_settings[setting] = args[setting]
+
+      // Get list of games from Sunshine apps
+      if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
+        var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+        var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
+        var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
+
+        for (const game of sunshine_json.apps){
+          // If we are adding resolution switching commands
+          if( current_settings.res_switching_enbl ){
+            // Check to see if this game has any prep commands.
+            // If not, add one with the appropriate resolution command
+            var has_qres_cmd = false;
+            if( game["prep-cmd"] ){
+              for( const cmd of game["prep-cmd"] ){
+
+                // If we already have QRes command, update it
+                if( cmd.do.includes("QRes.exe") || cmd.undo.includes("QRes.exe") ){
+                  cmd.do = do_cmd;
+                  cmd.undo = undo_cmd;
+                  has_qres_cmd = true;
+                  log("Updated QRes command for " + game.name);
+                }
+              }
+            }
+            else {
+              game["prep-cmd"] = [];
+            }
+
+            // If the game doesn't already have QRes command, add one
+            if( !has_qres_cmd ){
+              game["prep-cmd"].push({do:do_cmd, undo:undo_cmd})
+            }
+          }
+
+          // If we are disabling resolution switching, go rip
+          // out any QRes related prep commands
+          if( setting == "res_switching_enbl"
+           && !current_settings.res_switching_enbl ){
+            if( game["prep-cmd"] ){
+              var new_prep_cmd_list = []
+              for( const cmd of game["prep-cmd"] ){
+                if( !cmd.do.includes("QRes.exe") && !cmd.undo.includes("QRes.exe") ){
+                  new_prep_cmd_list.push(cmd);
+                }
+              }
+              game["prep-cmd"] = new_prep_cmd_list;
+            }
+          }
+
+        }
+        fs.writeFileSync(current_settings.sunshine_apps, JSON.stringify(sunshine_json, null, 4), (err) => {
+          if (err) {
+            log(err);
+            throw(err);
+          }
+        });
+      }
+
+    }
+
+    current_settings[setting] = args[setting];
   }
 
   // Validate the new settings
@@ -1316,10 +1443,15 @@ ipcMain.on("main_init", (event, data) => {
   // Update connection every second
   update_connection_prdc = setInterval(function() {
     update_connection();
-  }, 1000);
+  }, 2000);
 
   if (this_is_server) {
       log('Server stuff');
+      log(__dirname);
+
+    if( !fs.existsSync(qres_path)){
+      fs.writeFileSync(qres_path, fs.readFileSync(__dirname + "/QRes.exe"));
+    }
   }
   else {
     log('Client stuff');
@@ -1328,6 +1460,11 @@ ipcMain.on("main_init", (event, data) => {
 
     var import_app_list_item = menu.items[0].submenu.items.find(item => item.label === IMPORT_APP_LIST_STRING)
     import_app_list_item.visible = true;
+  }
+
+  if(dev_env){
+    log('Dev stuff');
+    mainWindow.webContents.send("open_settings_page");
   }
 });
 
@@ -1495,6 +1632,16 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
         template.name = application.DisplayName;
         template.detached = [ "explorer.exe shell:appsFolder\\" + application.command ];
         sunshine_json.apps.push(template)
+
+        if( current_settings.res_switching_enbl ){
+          var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
+          var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
+          template["prep-cmd"] = []
+          template["prep-cmd"].push({
+            do: do_cmd,
+            undo: undo_cmd
+          });
+        }
       }
 
       // Write the updated JSON data

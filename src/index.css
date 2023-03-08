@@ -111,7 +111,7 @@ div#app_fetch_output {
   overflow-y: auto;
 }
 
-input.settings,
+input.settings:not([type='checkbox']),
 select.settings {
   border-width: 1px;
   border-style: solid;
@@ -291,6 +291,34 @@ table#known_apps tr input {
   height: 24px;
 }
 
+#res_tbl_container {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  margin-left: -90px;
+  margin-top: 20px;
+  gap: 40px;
+  height: 0px;
+  transition: height 200ms;
+  overflow: hidden;
+}
+
+/* #res_tbl_container.open {
+  height: auto;
+} */
+
+#res_switch_lbl {
+  font-weight: lighter;
+}
+
+input.resolution {
+  width: 80px;
+}
+
+th.resolution {
+  font-weight: lighter;
+}
+
 button.delete_known_app_row {
   width: 30px;
   height: 30px;
@@ -308,11 +336,6 @@ table#known_apps th,
 table#known_apps input.known_app {
   width: 300px;
 }
-
-table#known_apps th {
-  text-align: left;
-}
-
 
 button#add_known_app {
   background-color:#5e965f;
@@ -414,7 +437,7 @@ button#add_known_app:hover {
   overflow-y:auto;
   flex-direction: column;
   flex-grow: 1000;
-  gap: 12px;
+  gap: 18px;
 }
 
 p.results_game_entry{
