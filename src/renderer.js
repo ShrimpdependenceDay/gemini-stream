@@ -33,6 +33,7 @@ function save_settings () {
     });
 
     settings['known_apps'] = {}
+    settings['res_switching_enbl'] = $("#res_switching_enbl")[0].checked;
 
     $('table#known_apps tr').each(function(){
         var uwp_name = $(this).find('input.uwp_name').val();
@@ -163,6 +164,15 @@ function hide_loading_screen() {
     $("div#loading_screen").fadeOut(150);
 }
 
+function update_res_switch_status() {
+    if($("#res_switching_enbl")[0].checked){
+        $("#res_tbl_container").height("90px");
+    }
+    else{
+        $("#res_tbl_container").height(0);
+    }
+}
+
 function load_app_list() {
     window.api.send("request_load_app_list");
 }
@@ -223,7 +233,6 @@ function init() {
     this_is_server = data.is_server;
     window.api.send("main_init", data);
 
-
     // Add click handlers for folder buttons
     $("button.get_path").on("click", function(){
         // Get ID of corresponding input
@@ -258,6 +267,7 @@ init();
 
 window.api.receive("load_settings", (data) => {
     console.log('Received load_settings from main')
+    console.log(data)
     for (let setting in data){
         switch(setting) {
             case 'known_apps':
@@ -284,6 +294,12 @@ window.api.receive("load_settings", (data) => {
                     });
                 }
                 break;
+
+            case 'res_switching_enbl':
+                $("#res_switching_enbl")[0].checked = data[setting];
+                update_res_switch_status();
+                break;
+
             default:
                 var setting_element = $('#' + setting);
                 setting_element.val(data[setting])

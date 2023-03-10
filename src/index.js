@@ -1,5 +1,5 @@
 // Includes
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, screen } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const { spawn, spawnSync } = require('child_process');
@@ -11,9 +11,6 @@ const ip = require('ip');
 const { data } = require('jquery');
 const { shell } = require('electron');
 
-log(ip.address()); // my ip address
-log(os.hostname());
-
 // Shared variables
 var this_is_server;
 var connected = false;
@@ -23,6 +20,7 @@ var usr_data_path = app.getPath('userData');
 var save_settings_timeout = null;
 var already_crashing;
 var dev_env = !__dirname.includes("app.asar");
+var debug_log = []
 const DEV_MENU_STRING = "Dev";
 
 // Stream client variables
@@ -30,6 +28,7 @@ var server;
 var stream_client_ready = false;
 var socket_clients = [];
 const OPEN_MANIFESTS_STRING = "Open manifests directory";
+const IMPORT_APP_LIST_STRING = "Import application list";
 
 // Stream server variables
 var socket;
@@ -48,6 +47,7 @@ var current_apps = 0;
 const GAMESTREAM_HOST = "NVIDIA GameStream";
 const SUNSHINE_HOST = "Sunshine";
 var valid_hosts = [ GAMESTREAM_HOST, SUNSHINE_HOST ];
+var qres_path = path.resolve(usr_data_path, 'QRes.exe');
 
 // Default settings
 var default_settings = {
@@ -61,13 +61,18 @@ var default_settings = {
     'FACEBOOK.317180B0BB486': 'Facebook Messenger'
   },
   host_name: '',
-  moonlight_options: '--quit-after',
+  moonlight_options: '--quit-after --resolution 1280x800',
   client_ip: "192.168.x.x",
   server_port: 5056,
   client_port: 5056,
   srm_location: "/home/deck/.local/share/applications/SRM.desktop",
   stream_host: SUNSHINE_HOST,
-  srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json')
+  srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json'),
+  res_switching_enbl: false,
+  res_pre_x: 1280,
+  res_pre_y: 800,
+  res_post_x: 0,
+  res_post_y: 0
 }
 
 // Current settings
@@ -82,11 +87,31 @@ var current_settings = {
   client_port: 0,
   srm_location: "",
   stream_host: "",
-  srm_configs: ''
+  srm_configs: '',
+  res_switching_enbl: false,
+  res_pre_x: 0,
+  res_pre_y: 0,
+  res_post_x: 0,
+  res_post_y: 0
 }
 
 // Settings validities
 var setting_validities = {};
+
+log(ip.address()); // my ip address
+log(os.hostname());
+log('App path: '+app.getAppPath());
+log(qres_path);
+
+app.whenReady().then(() => {
+  // We cannot require the screen module until the app is ready.
+  const { screen } = require('electron')
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  default_settings.res_post_x = primaryDisplay.size.width;
+  default_settings.res_post_y = primaryDisplay.size.height;
+  log('Set default screen resolution to ' + default_settings.res_post_x + 'x' + default_settings.res_post_y)
+})
 
 // Error handling
 process.on('uncaughtException', function (error) {
@@ -103,12 +128,12 @@ process.on('uncaughtException', function (error) {
   if (error.code == 'ECONNREFUSED' ||
       error.code == 'EACCES' ||
       error.code == 'EINVAL' ||
+      error.code == 'EAI_AGAIN' ||
       error.code == 'ECONNRESET' ||
       error.code == 'ECONNABORTED' ||
       error.code == 'ENETUNREACH' ||
       error.code == 'ELIFECYCLE' ||
       error.code == 'ENOTFOUND' ) {
-    log('Client not available - ' + error.code);
     connected = false;
   }
   else if ( error.code == 'ERR_SOCKET_BAD_PORT'){
@@ -133,6 +158,18 @@ process.on('uncaughtException', function (error) {
   }
 });
 
+const dev_menu_item =   {
+  label: 'Development',
+  submenu: [
+    {
+      label: 'Run dev function',
+      click: () => {
+        dev_function();
+      }
+    }
+  ]
+};
+
 // Toolbar configuration
 const toolbar_template = [
   {
@@ -148,6 +185,12 @@ const toolbar_template = [
         label: 'Show Log',
         click: () => {
           create_debug_log();
+        }
+      },
+      {
+        label: IMPORT_APP_LIST_STRING,
+        click: () => {
+          import_app_list();
         }
       },
       {
@@ -177,9 +220,16 @@ const toolbar_template = [
     ]
   }
 ]
+
+if( dev_env ){
+  toolbar_template.push(dev_menu_item);
+}
+
 const menu = Menu.buildFromTemplate(toolbar_template);
 var manifests_item = menu.items[0].submenu.items.find(item => item.label === OPEN_MANIFESTS_STRING)
+var import_app_list_item = menu.items[0].submenu.items.find(item => item.label === IMPORT_APP_LIST_STRING)
 manifests_item.visible = false;
+import_app_list_item.visible = false;
 Menu.setApplicationMenu(menu);
 
 // Keep a global reference of the window object, if you don't, the window will
@@ -348,18 +398,42 @@ function create_debug_log(){
     log_open = false;
   });
 
+  setTimeout(() => {
+    // Fill in the log with all the prior messages
+    for( var i in debug_log ){
+      console.log('Sent message: ' + debug_log[i])
+      debugWindow.webContents.send("message", debug_log[i]);
+    }
+  }, 500);
+
+}
+
+function dev_function(){
+  log('Running dev function');
+
 }
 
 function log(message) {
   try {
+    // Create a string using the current date/time + the given message,
+    // and add it to our debug log list of strings
     console.log(message);
+    var d = new Date();
+    var dt_string = '[' + d.toLocaleString() + '] '
+    var full_message = dt_string + message
+    debug_log.push(full_message)
+
+    // If the debug log list of strings exceeds maximum, remove the first
+    if( debug_log.length > 1000 ){
+      debug_log.shift();
+    }
+
+    // If the log isn't open, return early. Otherwise, send our message
+    // to the debug window
     if (!log_open || !debugWindow){
       return;
     }
-    var d = new Date();
-
-    var dt_string = '[' + d.toLocaleString() + '] '
-    debugWindow.webContents.send("message", dt_string + message);
+    debugWindow.webContents.send("message", full_message);
   } catch (error) {
 
   }
@@ -618,7 +692,12 @@ function update_connection(){
 
     // Get list of games in Sunshine apps
     if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
-      var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      try {
+        var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+      } catch (error) {
+          log('Interrupting file write');
+          return;
+      }
       game_count = sunshine_json.apps.length;
     }
 
@@ -699,77 +778,11 @@ function update_connection(){
         var data_str = data.toString();
         log(`${sock.remoteAddress}: ${data_str}`);
         if (data_str.includes("GEMINI_SYNC_REQUEST")){
-          // Build initial sync data. This will be sent both
-          // to the client's (this device's) renderer and
-          // sent back to the server's renderer for display
-          sync_data = {
-            id: "GEMINI_SYNC_STATUS",
-            success: true,
-            message: "Success!",
-            synced_games: [],
-            srm_loc_valid: false
-          }
-
           // Get JSON from socket message
           rx_data = JSON.parse(data_str);
           mainWindow.webContents.send("sync_start");
 
-          // If the manifests directory doesn't exist, create it
-          if (!fs.existsSync(manifests_dir_path)){
-            fs.mkdir(manifests_dir_path, (err) => {
-              if (err) {
-                  console.error(err);
-                  sync_data.success = false;
-                  sync_data.message = "Failed to create manifests directory";
-                  mainWindow.webContents.send("sync_result", sync_data);
-                  return;
-              }
-              log('Manifests directory created successfully');
-              add_manifests_menu_item();
-              return;
-            });
-          }
-
-          var manifest_data = [];
-
-          // for each game in the received data
-          for(var g in rx_data.games){
-            // create game definition
-            var game_def = {
-              title: rx_data.games[g],
-              target: "/usr/bin/flatpak",
-              startIn: "/usr/bin/",
-              launchOptions: "run --branch=stable --arch=x86_64 --command=moonlight com.moonlight_stream.Moonlight stream " + current_settings.moonlight_options + " " + current_settings.host_name + ` "${rx_data.games[g]}"`
-            }
-
-            // Add game definition to manifest data
-            manifest_data.push(game_def);
-          }// end for
-
-          log("Manifest data:");
-          log(JSON.stringify(manifest_data, null, 4));
-
-          // Write manifest data to file
-          fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data, null, 4), (err) => {
-            if (err) {
-              log(err);
-              sync_data.success = false;
-              sync_data.message = "Failed to write manifests data";
-              mainWindow.webContents.send("sync_result", sync_data);
-              return;
-            }
-            log("Added synchronized games list to " + srm_manifest_path);
-          });
-
-          // If sync was successful, populate sync data indicating that fact
-          if (sync_data.success) {
-            sync_data.message = "Successfully synchronized the following applications:";
-            sync_data.synced_games = rx_data.games;
-            sync_data.srm_loc_valid = setting_validities['srm_location'];
-          }
-
-          // send sync result to renderer
-          mainWindow.webContents.send("sync_result", sync_data);
+          sync_to_manifest(rx_data);
 
           // Send sync result back to server
           var sync_data_str = JSON.stringify(sync_data, null, 4);
@@ -819,6 +832,61 @@ function init_socket_client(){
       mainWindow.webContents.send("sync_result", sync_data);
     }
   });
+}
+
+
+const import_app_list = async () => {
+  // Open file dialog
+  const dialog_ret = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select applications list to load',
+    filters: [
+      { name: 'json', extensions: ['json'] }
+    ],
+    properties: [ 'openFile' ]
+  });
+
+  if (dialog_ret.canceled){
+    return;
+  }
+
+  // load JSON from file
+  log("Importing from " + dialog_ret.filePaths[0]);
+  try {
+    var import_app_list_json = JSON.parse(fs.readFileSync(dialog_ret.filePaths[0]));
+  } catch (error) {
+      show_import_format_error();
+      return;
+  }
+
+  // Create empty rx_data
+  var rx_data = {
+    id: "GEMINI_SYNC_REQUEST",
+    games: []
+  }
+  log("import_app_list_json:");
+  log(JSON.stringify(import_app_list_json, null, 4));
+
+  // Validate app list file
+  if( !( 'apps' in import_app_list_json ) ){
+    show_import_format_error();
+    return;
+  }
+
+  // Iterate over apps array, populating rx_data with apps[index].name and application settings for moonlight options
+  for( var i in import_app_list_json['apps'] ){
+    var app = import_app_list_json['apps'][i];
+    if( !( 'name' in app ) ){
+      show_import_format_error();
+      return;
+    }
+
+    rx_data.games.push(app.name);
+  }
+
+  // Sync the data from the app list to our manifest file
+  log("rx_data:");
+  log(JSON.stringify(rx_data, null, 4));
+  sync_to_manifest(rx_data);
 }
 
 
@@ -880,7 +948,7 @@ function validate_settings (settings) {
     setting_validities[setting] = false;
 
     // assert reminder for new config items
-    assert.equal(11, Object.keys(default_settings).length);
+    assert.equal(16, Object.keys(default_settings).length);
     switch(setting) {
       // Shield Apps directory - must exist
       case 'shield_apps_dir':
@@ -942,6 +1010,7 @@ function validate_settings (settings) {
 
       default:
         log('Did not validate ' + setting);
+        setting_validities[setting] = true;
         break;
     }
   }
@@ -955,6 +1024,23 @@ function show_about(){
     // detail: `Created by ${pkg.author.name}`
     // icon: path.join(__dirname, '..', 'static/Icon.png'),
    });
+}
+
+function show_import_format_error(){
+  const messageBoxOptions = {
+    type: "error",
+    title: "Error",
+    message: "Invalid application list format\n\nApplication list should be " +
+             "a JSON file containing apps[ ], with each app having a name property" +
+             "\n\nExample:\n\n" +
+             "{\n" +
+             "\"apps\": [\n" +
+             "            { \"name\":  \"Game Name 1\" },\n" +
+             "            { \"name\":  \"Game Name 2\" }\n" +
+             "          ]\n" +
+             "}"
+  };
+  dialog.showMessageBoxSync(messageBoxOptions);
 }
 
 function save_settings(args){
@@ -987,7 +1073,80 @@ function save_settings(args){
       }
     }
 
-    current_settings[setting] = args[setting]
+    // If the resolution switching setting has changed, try
+    // to go and update our sunshine apps list appropriately
+    if ( ( setting == "res_switching_enbl"
+        || setting == "res_pre_x"
+        || setting == "res_pre_y"
+        || setting == "res_post_x"
+        || setting == "res_post_y" )
+      && args[setting] != current_settings[setting] ){
+      if (!this_is_server){
+        return;
+      }
+      current_settings[setting] = args[setting]
+
+      // Get list of games from Sunshine apps
+      if( current_settings.stream_host == SUNSHINE_HOST && setting_validities.sunshine_apps) {
+        var sunshine_json = JSON.parse(fs.readFileSync(current_settings.sunshine_apps));
+        var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
+        var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
+
+        for (const game of sunshine_json.apps){
+          // If we are adding resolution switching commands
+          if( current_settings.res_switching_enbl ){
+            // Check to see if this game has any prep commands.
+            // If not, add one with the appropriate resolution command
+            var has_qres_cmd = false;
+            if( game["prep-cmd"] ){
+              for( const cmd of game["prep-cmd"] ){
+
+                // If we already have QRes command, update it
+                if( (cmd.do && cmd.do.includes("QRes.exe") ) || (cmd.undo && cmd.undo.includes("QRes.exe") ) ){
+                  cmd.do = do_cmd;
+                  cmd.undo = undo_cmd;
+                  has_qres_cmd = true;
+                  log("Updated QRes command for " + game.name);
+                }
+              }
+            }
+            else {
+              game["prep-cmd"] = [];
+            }
+
+            // If the game doesn't already have QRes command, add one
+            if( !has_qres_cmd ){
+              game["prep-cmd"].push({do:do_cmd, undo:undo_cmd})
+            }
+          }
+
+          // If we are disabling resolution switching, go rip
+          // out any QRes related prep commands
+          if( setting == "res_switching_enbl"
+           && !current_settings.res_switching_enbl ){
+            if( game["prep-cmd"] ){
+              var new_prep_cmd_list = []
+              for( const cmd of game["prep-cmd"] ){
+                if( (!cmd.do || !cmd.do.includes("QRes.exe")) && (!cmd.undo || !cmd.undo.includes("QRes.exe")) ){
+                  new_prep_cmd_list.push(cmd);
+                }
+              }
+              game["prep-cmd"] = new_prep_cmd_list;
+            }
+          }
+
+        }
+        fs.writeFileSync(current_settings.sunshine_apps, JSON.stringify(sunshine_json, null, 4), (err) => {
+          if (err) {
+            log(err);
+            throw(err);
+          }
+        });
+      }
+
+    }
+
+    current_settings[setting] = args[setting];
   }
 
   // Validate the new settings
@@ -1099,6 +1258,81 @@ function sync_srm_cnfg() {
 }
 
 
+function sync_to_manifest(rx_data) {
+    // Build initial sync data. This will be sent
+    // to the client's (this device's) renderer in this
+    // function, as well as back to the host if sync
+    // was done using TCP connection via a parent function
+    sync_data = {
+      id: "GEMINI_SYNC_STATUS",
+      success: true,
+      message: "Success!",
+      synced_games: [],
+      srm_loc_valid: false
+    }
+
+  // If the manifests directory doesn't exist, create it
+  if (!fs.existsSync(manifests_dir_path)){
+    fs.mkdir(manifests_dir_path, (err) => {
+      if (err) {
+          console.error(err);
+          sync_data.success = false;
+          sync_data.message = "Failed to create manifests directory";
+          mainWindow.webContents.send("sync_result", sync_data);
+          return sync_data;
+      }
+      log('Manifests directory created successfully');
+      add_manifests_menu_item();
+    });
+  }
+
+  var manifest_data = [];
+
+  // for each game in the received data
+  for(var g in rx_data.games){
+    // create game definition
+    var game_def = {
+      title: rx_data.games[g],
+      target: "/usr/bin/flatpak",
+      startIn: "/usr/bin/",
+      launchOptions: "run --branch=stable --arch=x86_64 --command=moonlight com.moonlight_stream.Moonlight stream " + current_settings.moonlight_options + " " + current_settings.host_name + ` "${rx_data.games[g]}"`
+    }
+
+    // Add game definition to manifest data
+    manifest_data.push(game_def);
+  }// end for
+
+  log("Manifest data:");
+  log(JSON.stringify(manifest_data, null, 4));
+
+  // Write manifest data to file
+  fs.writeFile(srm_manifest_path, JSON.stringify(manifest_data, null, 4), (err) => {
+    if (err) {
+      log(err);
+      sync_data.success = false;
+      sync_data.message = "Failed to write manifests data";
+      mainWindow.webContents.send("sync_result", sync_data);
+      return sync_data;
+    }
+    log("Added synchronized games list to " + srm_manifest_path);
+  });
+
+  // If sync was successful, populate sync data indicating that fact
+  if (sync_data.success) {
+    sync_data.message = "Successfully synchronized the following applications:";
+    sync_data.synced_games = rx_data.games;
+    sync_data.srm_loc_valid = setting_validities['srm_location'];
+  }
+
+  // send sync result to renderer
+  mainWindow.webContents.send("sync_result", sync_data);
+
+  // return the sync result so the caller can do what
+  // it needs
+  return sync_data;
+}
+
+
 /******************************************************************
 *                     IPC HANDLING                                *
 ******************************************************************/
@@ -1203,15 +1437,27 @@ ipcMain.on("main_init", (event, data) => {
   // Update connection every second
   update_connection_prdc = setInterval(function() {
     update_connection();
-  }, 1000);
+  }, 2000);
 
   if (this_is_server) {
       log('Server stuff');
+      log(__dirname);
+
+    if( !fs.existsSync(qres_path)){
+      fs.writeFileSync(qres_path, fs.readFileSync(__dirname + "/QRes.exe"));
+    }
   }
   else {
     log('Client stuff');
     sync_srm_cnfg();
     add_manifests_menu_item();
+
+    var import_app_list_item = menu.items[0].submenu.items.find(item => item.label === IMPORT_APP_LIST_STRING)
+    import_app_list_item.visible = true;
+  }
+
+  if(dev_env){
+    log('Dev stuff');
   }
 });
 
@@ -1318,7 +1564,7 @@ ipcMain.on("fetch_apps", (event, args) => {
 // input_id is needed so, when a response is sent, we know
 // which input to populate.
 ipcMain.on("get_path", (event, args) => {
-  log('Received "get_directory" from renderer ' + args.input_id);
+  log('Received "get_path" from renderer ' + args.input_id);
 
   // Get path from user. Call external function because it must be async
   get_user_path(args.input_id, args.is_file);
@@ -1367,18 +1613,63 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
       }
 
       var existing_cnfg = sunshine_json.apps.find(cnfg => cnfg.name === application.DisplayName);
+      var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
+      var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
       if (existing_cnfg){
         // Found an existing config for this game, so just
         // update the detached command for it
         log("Found " + application.DisplayName + " in " + current_settings.sunshine_apps);
         existing_cnfg.detached = [ "explorer.exe shell:appsFolder\\" + application.command ]
+
+        // Also add/update QRes commands if necessary
+        if( current_settings.res_switching_enbl ){
+          var needs_qres_cmd = true;
+
+          // If this existing config has any prep commands,
+          // iterate over all of them, and write the current
+          // resolution changing commands for any that contain "QRes"
+          if( existing_cnfg["prep-cmd"] ){
+            for( var cmd of existing_cnfg["prep-cmd"] ){
+              if( ( cmd.do && cmd.do.includes("QRes"))
+               || ( cmd.undo && cmd.undo.includes("QRes"))){
+                // This means we found a config with a QRes command,
+                // so we don't need to add one later
+                cmd.do = do_cmd;
+                cmd.undo = undo_cmd;
+                needs_qres_cmd = false;
+               }
+            }
+          }
+          else{
+            // prep-cmd was not found, so create an
+            // empty array so we can push a command for QRes
+            existing_cnfg["prep-cmd"] = [];
+          }
+
+          // If a QRes command was not already found for this application,
+          // push a new one
+          if(needs_qres_cmd){
+            existing_cnfg["prep-cmd"].push({
+              do: do_cmd,
+              undo: undo_cmd
+            });
+          }
+        }
       }
       else{
         // Did not find any existing config, so populate the template
         // and push it to the sunshine json
         template.name = application.DisplayName;
         template.detached = [ "explorer.exe shell:appsFolder\\" + application.command ];
+        if( current_settings.res_switching_enbl ){
+          template["prep-cmd"] = []
+          template["prep-cmd"].push({
+            do: do_cmd,
+            undo: undo_cmd
+          });
+        }
         sunshine_json.apps.push(template)
+
       }
 
       // Write the updated JSON data

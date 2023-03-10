@@ -166,6 +166,43 @@
             <button class="go_to file"><img src="icons/go-to.png"/></button>
           </div>
         </div>
+        <div class="settings-input host_dependent sunshine_setting" id="res_switch_div"><p class="settings-label">Resolution Switching</p>
+          <div class="form-group">
+            <input type="checkbox" class="settings" id="res_switching_enbl" name="res_switching_enbl" onclick="update_res_switch_status()"><label id="res_switch_lbl" for="res_switching_enbl"> Change resolution on stream start and end</label><br>
+          </div>
+
+          <div id="res_tbl_container">
+            <table class="resolution_tbl" id="res_table_pre">
+              <colgroup span="2"></colgroup>
+              <tr>
+                <th colspan="2" scope="colgroup">Start</th>
+              </tr>
+              <tr>
+                <th class="resolution" scope="col">Width</th>
+                <th class="resolution" scope="col">Height</th>
+              </tr>
+              <tr>
+                <td><input class="resolution settings" id="res_pre_x" type="text" onkeypress="return isNumberKey(this, event);"></td>
+                <td><input class="resolution settings" id="res_pre_y" type="text" onkeypress="return isNumberKey(this, event);"></td>
+              </tr>
+            </table>
+            <table class="resolution_tbl" id="res_table_post">
+              <colgroup span="2"></colgroup>
+              <tr>
+                <th colspan="2" scope="colgroup">End</th>
+              </tr>
+              <tr>
+                <th class="resolution" scope="col">Width</th>
+                <th class="resolution" scope="col">Height</th>
+              </tr>
+              <tr>
+                <td><input class="resolution settings" id="res_post_x" type="text" onkeypress="return isNumberKey(this, event);"></td>
+                <td><input class="resolution settings" id="res_post_y" type="text" onkeypress="return isNumberKey(this, event);"></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
 
 
         <div class="settings-input" id="known_apps_div"><p class="settings-label">Known applications</p>
