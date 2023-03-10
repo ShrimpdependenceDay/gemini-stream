@@ -62,7 +62,7 @@ var default_settings = {
     'FACEBOOK.317180B0BB486': 'Facebook Messenger'
   },
   host_name: '',
-  moonlight_options: '--quit-after',
+  moonlight_options: '--quit-after --resolution 1280x800',
   client_ip: "192.168.x.x",
   server_port: 5056,
   client_port: 5056,
@@ -70,8 +70,8 @@ var default_settings = {
   stream_host: SUNSHINE_HOST,
   srm_configs: path.resolve(os.homedir(), '.config/steam-rom-manager/userData/userConfigurations.json'),
   res_switching_enbl: false,
-  res_pre_x: 800,
-  res_pre_y: 600,
+  res_pre_x: 1280,
+  res_pre_y: 800,
   res_post_x: 0,
   res_post_y: 0
 }
@@ -1620,11 +1620,18 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
       }
 
       var existing_cnfg = sunshine_json.apps.find(cnfg => cnfg.name === application.DisplayName);
+      var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
+      var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
       if (existing_cnfg){
         // Found an existing config for this game, so just
         // update the detached command for it
         log("Found " + application.DisplayName + " in " + current_settings.sunshine_apps);
         existing_cnfg.detached = [ "explorer.exe shell:appsFolder\\" + application.command ]
+        existing_cnfg["prep-cmd"] = []
+        existing_cnfg["prep-cmd"].push({
+          do: do_cmd,
+          undo: undo_cmd
+        });
       }
       else{
         // Did not find any existing config, so populate the template
@@ -1634,8 +1641,6 @@ ipcMain.on("export_selected_apps", (event, selected_apps) => {
         sunshine_json.apps.push(template)
 
         if( current_settings.res_switching_enbl ){
-          var do_cmd = qres_path + " /X:" + current_settings.res_pre_x + " /Y:" + current_settings.res_pre_y;
-          var undo_cmd = qres_path + " /X:" + current_settings.res_post_x + " /Y:" + current_settings.res_post_y;
           template["prep-cmd"] = []
           template["prep-cmd"].push({
             do: do_cmd,

@@ -1,4 +1,19 @@
+# Add comma separated platform sources here to
+# include games other than Game Pass games (e.g. "Xbox", "Steam", "Epic")
+$global:sources = "Xbox"
 
+# Path to Gemini Stream config. This is where this script
+# will pull settings from if the path is valid.
+# Otherwise, the global values below will be used.
+$global:gs_config_path = Join-Path -Path $env:APPDATA -ChildPath "Gemini Stream/config.json"
+
+# These values will be used if a Gemini Stream
+# config could not be found at the default location.
+# Update them if you don't want to use the Gemini Stream config,
+# otherwise, don't worry about them.
+$global:apps_location = "C:/Program Files/Sunshine/config/apps.json"
+$global:client_ip = "192.168.0.0"
+$global:port = "5056"
 
 function OnApplicationStarted()
 {
@@ -64,26 +79,37 @@ function AddGameToSunshineApps([Playnite.SDK.Models.Game]$game, [String]$apps_pa
         $sunshine_apps = $new_sunshine_apps
     }
 
-    # Check to see if the current game is already in the applications list
-    if( -not $sunshine_apps.apps.name -or -not $sunshine_apps.apps.name.contains($game.name) ){
+    [System.Collections.ArrayList]$sunshine_app_list = $sunshine_apps.apps
+    $add_game = $true
+    $command = $PlayniteApi.Paths.ApplicationPath+"\Playnite.DesktopApp.exe --start "+$game.id
+
+    foreach( $sunshine_app in $sunshine_app_list )
+    {
+        # If we found the game, update the detached command
+        if( $sunshine_app.name -eq $game.name )
+        {
+            $__logger.Info('Updating detached command for '+$game.name)
+            [System.Collections.ArrayList]$detached = @()
+            $detached.Add($command)
+            $sunshine_app.detached = $detached
+            $add_game = $false
+        }
+    }
+
+    if( $add_game )
+    {
         # Application was not found, so add it
-        Write-Host $game.name "not in list of sunshine apps"
-        $__logger.Info($game.name+" not in list of sunshine apps")
-        $command = $PlayniteApi.Paths.ApplicationPath+"\Playnite.DesktopApp.exe --start "+$game.id
+        $__logger.Info('Adding '+$game.name+" to list of sunshine apps")
         $my_sunshine_app = New-Object -TypeName SunshineApp -ArgumentList $game.name, $command
         [System.Collections.ArrayList]$sunshine_app_list = $sunshine_apps.apps
         $sunshine_app_list.Add($my_sunshine_app)
         $sunshine_apps.apps = $sunshine_app_list
+    }
 
-        # Write the updated Sunshine apps .json
-        $sunshine_apps_str = $sunshine_apps | ConvertTo-Json -depth 32
-        $sunshine_apps_str = $sunshine_apps_str.replace('image_path', 'image-path')
-        $sunshine_apps_str | set-content $apps_path
-    }
-    else{
-        $__logger.Info($game.name+" found in list of sunshine apps")
-        Write-Host $game.name "found in list of sunshine apps"
-    }
+    # Write the updated Sunshine apps .json
+    $sunshine_apps_str = $sunshine_apps | ConvertTo-Json -depth 32
+    $sunshine_apps_str = $sunshine_apps_str.replace('image_path', 'image-path')
+    $sunshine_apps_str | set-content $apps_path
 }
 
 function GeminiStreamExport()
@@ -128,24 +154,20 @@ function GeminiStreamExport()
     }
 
     # Get our Gemini Stream config
-    $gs_config_path = Join-Path -Path $env:APPDATA -ChildPath "Gemini Stream/config.json"
-    if(Test-Path -Path $gs_config_path -PathType Leaf)
+    if(Test-Path -Path $global:gs_config_path -PathType Leaf)
     {
-        $__logger.Info("Located config at: "+$gs_config_path)
-        $gs_config = Get-Content -Raw $gs_config_path | ConvertFrom-Json
+        $__logger.Info("Located config at: "+$global:gs_config_path)
+        $gs_config = Get-Content -Raw $global:gs_config_path | ConvertFrom-Json
     }
     else {
         # Some default config
         $gs_config = New-Object PSObject
-        $gs_config | Add-Member Noteproperty -Name sunshine_apps -value "C:/Program Files/Sunshine/config/apps.json"
-        $gs_config | Add-Member Noteproperty -Name client_ip -value "192.168.0.0" # UPDATE THIS IF NECESSARY
-        $gs_config | Add-Member Noteproperty -Name server_port -value "5056"
+        $gs_config | Add-Member Noteproperty -Name sunshine_apps -value $global:apps_location
+        $gs_config | Add-Member Noteproperty -Name client_ip -value $global:client_ip
+        $gs_config | Add-Member Noteproperty -Name server_port -value $global:port
     }
 
-    # All filter sources
-    $sources = "Xbox", "Ubisoft Connect"
-
-    foreach( $source in $sources )
+    foreach( $source in $global:sources )
     {
         # Create filter and fetch games
         $filter = new-object Playnite.SDK.Models.FilterPresetSettings
@@ -169,7 +191,6 @@ function GeminiStreamExport()
             }
         }
     }
-
 
     # Read in the final list of applications, and populate the Gemini Stream Sync request
     $sunshine_apps = Get-Content -Raw $gs_config.sunshine_apps | ConvertFrom-Json
@@ -209,7 +230,9 @@ function GeminiStreamExport()
             )
             if( $dialog_result -eq "Yes" )
             {
-
+                $app_list_dir = Split-Path -parent $gs_config.sunshine_apps
+                $__logger.Info("App list located at "+$app_list_dir)
+                Invoke-Item $app_list_dir
             }
         }
 
@@ -223,6 +246,10 @@ function GeminiStreamExport()
             $reader.Close()
             $writer.Close()
             $tcpConnection.Close()
+
+            # We're not even going to check for a response from
+            # the client, because we're 100% sure the sync was successful
+            # and there's no chance anything could've gone wrong ;)
             $PlayniteApi.Dialogs.ShowMessage("Synchronized the following applications:`r`n`t"+$games_joined)
         }
     }
@@ -233,14 +260,6 @@ function GetMainMenuItems()
     param(
         $getMainMenuItemsArgs
     )
-
-    # If Gemini Stream config doesn't exist, don't show menu item
-    $gs_config_path = Join-Path -Path $env:APPDATA -ChildPath "Gemini Stream/config.json"
-    if(-not (Test-Path -Path $gs_config_path -PathType Leaf))
-    {
-        $__logger.Info("Could not find Gemini Stream config at "+$gs_config_path)
-        return
-    }
 
     $menuItem = New-Object Playnite.SDK.Plugins.ScriptMainMenuItem
     $menuItem.Description = "Gemini Stream"
